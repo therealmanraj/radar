@@ -12,6 +12,7 @@ Run: streamlit run app.py
 import streamlit as st
 import numpy as np
 import time
+import matplotlib.pyplot as plt
 
 # -----------------------------------------------------------------------
 # PAGE CONFIG
@@ -82,31 +83,33 @@ def get_simulated_frame(num_range: int, num_doppler: int) -> np.ndarray:
 
 
 # -----------------------------------------------------------------------
-# DATA SOURCE: REAL SDK (placeholder)
+# DATA SOURCE: REAL SDK
 # -----------------------------------------------------------------------
-def get_real_sdk_frame(num_range: int, num_doppler: int) -> np.ndarray:
+NUM_CHIRPS  = 32
+NUM_SAMPLES = 64
+
+def compute_rd_map(frame_list: list) -> np.ndarray:
     """
-    *** PHASE 2: REPLACE THIS WITH REAL SDK CODE ***
-
-    Example (requires ifxradarsdk installed):
-
-        from ifxradarsdk.fmcw import DeviceFmcw
-        # ... (device must be opened once, not per frame)
-        raw_frame = device.get_next_frame()  # list of rx arrays
-        rx0 = raw_frame[0]  # shape: (num_chirps, num_samples)
-
-        # Range FFT
-        range_fft = np.fft.fft(rx0, axis=1)[:, :num_samples//2]
-
-        # Doppler FFT (across chirps)
-        rd_map = np.fft.fftshift(np.fft.fft(range_fft, axis=0), axes=0)
-
-        return np.abs(rd_map)
-
-    For now, return fake data:
+    Convert raw SDK frame into a Range-Doppler magnitude map.
+    frame_list: output of device.get_next_frame() — list with one
+                (num_rx, num_chirps, num_samples) array.
+    Returns: 2D float array (num_chirps, num_samples//2)
     """
-    st.warning("Real SDK not connected — showing simulation. Install ifxradarsdk and update get_real_sdk_frame().")
-    return get_simulated_frame(num_range, num_doppler)
+    rx_data = frame_list[0]          # (3, 32, 64)
+    rx0 = rx_data[0].astype(float)   # (32, 64) — use RX0
+
+    # Hanning windows to reduce sidelobes
+    win_range   = np.hanning(rx0.shape[1])
+    win_doppler = np.hanning(rx0.shape[0])
+    windowed = rx0 * win_range[np.newaxis, :] * win_doppler[:, np.newaxis]
+
+    # Range FFT → one-sided
+    range_fft = np.fft.fft(windowed, axis=1)[:, :rx0.shape[1] // 2]
+
+    # Doppler FFT across chirps, centred
+    rd_map = np.fft.fftshift(np.fft.fft(range_fft, axis=0), axes=0)
+
+    return np.abs(rd_map)   # (num_chirps, num_samples//2)
 
 
 # -----------------------------------------------------------------------
@@ -136,67 +139,96 @@ with stop_col:
         st.session_state.running = False
 
 # -----------------------------------------------------------------------
+# RENDER HELPERS
+# -----------------------------------------------------------------------
+def render_frame(display: np.ndarray):
+    """Draw one heatmap frame and update stats."""
+    global frame_count
+    fig, ax = plt.subplots(figsize=(9, 4))
+    im = ax.imshow(
+        display,
+        aspect="auto",
+        origin="lower",
+        cmap=color_scale,
+        interpolation="bilinear",
+    )
+    ax.set_xlabel("Range bin →")
+    ax.set_ylabel("← Closing | Doppler bin | Opening →")
+    ax.set_title(f"Range-Doppler Map | Frame {frame_count}")
+    fig.colorbar(im, ax=ax, label="Power (dB)" if log_scale else "Power (linear)")
+    fig.tight_layout()
+    heatmap_placeholder.pyplot(fig, use_container_width=True)
+    plt.close(fig)
+
+    if show_stats:
+        stats_placeholder.metric("Frame #", frame_count)
+        stats_placeholder.metric("Peak power", f"{display.max():.1f} {'dB' if log_scale else ''}")
+        stats_placeholder.metric(
+            "Peak range bin", f"{np.unravel_index(display.argmax(), display.shape)[1]}"
+        )
+    frame_count += 1
+
+
+# -----------------------------------------------------------------------
 # RENDER LOOP
 # -----------------------------------------------------------------------
 if st.session_state.running:
-    # Import here to avoid slowing down initial page load
-    import matplotlib.pyplot as plt
-    import matplotlib.colors as mcolors
+    if data_source == "Real SDK (ifxradarsdk)":
+        # Open device ONCE, then loop — never open/close per frame
+        try:
+            from ifxradarsdk.fmcw import DeviceFmcw
+            from ifxradarsdk.fmcw.types import FmcwSimpleSequenceConfig, FmcwSequenceChirp
 
-    while st.session_state.running:
-        t0 = time.time()
+            with DeviceFmcw() as device:
+                config = FmcwSimpleSequenceConfig(
+                    frame_repetition_time_s=1.0 / fps,
+                    chirp_repetition_time_s=0.5e-3,
+                    num_chirps=NUM_CHIRPS,
+                    tdm_mimo=False,
+                    chirp=FmcwSequenceChirp(
+                        start_frequency_Hz=60e9,
+                        end_frequency_Hz=61.5e9,
+                        sample_rate_Hz=1e6,
+                        num_samples=NUM_SAMPLES,
+                        rx_mask=7,
+                        tx_mask=1,
+                        tx_power_level=31,
+                        lp_cutoff_Hz=500000,
+                        hp_cutoff_Hz=80000,
+                        if_gain_dB=33,
+                    ),
+                )
+                sequence = device.create_simple_sequence(config)
+                device.set_acquisition_sequence(sequence)
 
-        # --- GET DATA ---
-        if data_source == "Simulation (fake)":
+                while st.session_state.running:
+                    t0 = time.time()
+                    raw = device.get_next_frame()
+                    rd = compute_rd_map(raw)
+                    display = 20 * np.log10(np.clip(rd, 1e-6, None)) if log_scale else rd
+                    render_frame(display)
+                    elapsed = time.time() - t0
+                    if frame_delay - elapsed > 0:
+                        time.sleep(frame_delay - elapsed)
+
+        except Exception as e:
+            st.error(f"SDK error: {e}")
+            st.session_state.running = False
+
+    else:
+        while st.session_state.running:
+            t0 = time.time()
             frame = get_simulated_frame(num_range_bins, num_doppler_bins)
-        else:
-            frame = get_real_sdk_frame(num_range_bins, num_doppler_bins)
-
-        # --- APPLY LOG SCALE ---
-        if log_scale:
-            # Convert to dB, clip negative values
-            display = 20 * np.log10(np.clip(frame, 1e-6, None))
-        else:
-            display = frame
-
-        # --- RENDER HEATMAP ---
-        fig, ax = plt.subplots(figsize=(9, 4))
-        im = ax.imshow(
-            display,
-            aspect="auto",
-            origin="lower",
-            cmap=color_scale,
-            interpolation="bilinear",
-        )
-        ax.set_xlabel("Range bin →")
-        ax.set_ylabel("← Closing | Doppler bin | Opening →")
-        ax.set_title(f"Range-Doppler Map | Frame {frame_count}")
-        fig.colorbar(im, ax=ax, label="Power (dB)" if log_scale else "Power (linear)")
-        fig.tight_layout()
-
-        heatmap_placeholder.pyplot(fig, use_container_width=True)
-        plt.close(fig)
-
-        # --- STATS ---
-        if show_stats:
-            stats_placeholder.metric("Frame #", frame_count)
-            stats_placeholder.metric("Peak power", f"{display.max():.1f} {'dB' if log_scale else ''}")
-            stats_placeholder.metric(
-                "Peak range bin", f"{np.unravel_index(display.argmax(), display.shape)[1]}"
-            )
-
-        frame_count += 1
-
-        # Pace the loop
-        elapsed = time.time() - t0
-        remaining = frame_delay - elapsed
-        if remaining > 0:
-            time.sleep(remaining)
+            display = 20 * np.log10(np.clip(frame, 1e-6, None)) if log_scale else frame
+            render_frame(display)
+            elapsed = time.time() - t0
+            remaining = frame_delay - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
 else:
     st.info("Press **Start** to begin streaming the radar heatmap.")
 
     # Show a static example heatmap so the UI is not blank
-    import matplotlib.pyplot as plt
     ex_frame = get_simulated_frame(num_range_bins, num_doppler_bins)
     if log_scale:
         ex_frame = 20 * np.log10(np.clip(ex_frame, 1e-6, None))

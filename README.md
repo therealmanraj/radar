@@ -1,6 +1,6 @@
 # BGT60TR13C Radar — Python Acquisition + Streamlit Heatmap
 
-Infineon DEMO BGT60TR13C | 60 GHz FMCW | Python 3 | macOS / Windows
+Infineon DEMO BGT60TR13C | 60 GHz FMCW | Python 3 | Windows
 
 ---
 
@@ -11,7 +11,7 @@ BGT60TR13C sensor
       │  USB
       ▼
   Python acquisition (ifxradarsdk)
-      │  numpy arrays  (num_chirps × num_samples per RX antenna)
+      │  numpy arrays  (num_rx × num_chirps × num_samples)
       ▼
   DSP processing (FFT → Range-Doppler map)
       │  2D power matrix
@@ -21,16 +21,27 @@ BGT60TR13C sensor
 
 ---
 
+## Current status
+
+| Component | Status |
+|---|---|
+| Board detected | **COM3** — VID:PID=058B:0251 (BGT60TR13C) |
+| ifxradarsdk | **3.6.4** — installed from `radar_sdk.zip` |
+| Frame capture | Working — 10 frames verified |
+| Streamlit GUI | Working — Real SDK mode functional |
+
+---
+
 ## Key hardware fact (read this first)
 
 The BGT60TR13C exposes **two separate USB interfaces** on the same cable:
 
 | Interface | What it is | How to access |
 |---|---|---|
-| IFX CDC (`/dev/cu.usbmodem*` on Mac, `COMx` on Windows) | Control/status channel | pyserial — but you will see **zero bytes** here (normal) |
+| IFX CDC (`COMx` on Windows) | Control/status channel | pyserial — but you will see **zero bytes** here (normal) |
 | USB Bulk endpoint | Actual radar frame data | **ifxradarsdk only** — pyserial cannot see this |
 
-**Conclusion:** pyserial can open the port and confirm the board is alive, but it will never receive radar frames. You need the Infineon SDK for real data.
+**Conclusion:** pyserial can open the port and confirm the board is alive, but it will never receive radar frames. The SDK connects via USB bulk transfer — no COM port needed.
 
 ---
 
@@ -42,8 +53,6 @@ The BGT60TR13C exposes **two separate USB interfaces** on the same cable:
 | Fast green blink | Firmware running, actively acquiring |
 | Slow green blink | Bootloader / waiting for firmware flash |
 | No light | Power issue, bad cable, or board not detected |
-
-Fast blink on macOS is fine — it means the board is alive. The SDK is what unlocks the data.
 
 ---
 
@@ -57,135 +66,133 @@ Radar/
 ├── test.py                ← MASTER diagnostic (run this first on any machine)
 ├── detect_ports.py        ← list serial ports, highlight Infineon device
 ├── inspect_serial.py      ← deep multi-baud scan + raw byte log
-├── usb_check.py           ← query OS USB tree (macOS: system_profiler)
+├── usb_check.py           ← query OS USB tree (Windows: PowerShell/PnP)
 │
 ├── sdk_check.py           ← verify ifxradarsdk installation
 ├── avian_test.py          ← SDK frame capture (--sim mode works without hardware)
 │
-└── app.py                 ← Streamlit heatmap GUI
+└── app.py                 ← Streamlit heatmap GUI (real SDK + simulation modes)
 ```
 
 ---
 
-## Phase 1 — Hardware diagnosis (works on macOS now)
+## Setup (Windows)
 
-### Install dependencies
+### 1. Install the Radar Development Kit
 
-```bash
-pip install pyserial numpy streamlit matplotlib
-```
-
-### Run the master diagnostic
-
-```bash
-python test.py
-```
-
-Expected output with board connected:
-```
-STEP 1 — Serial port scan
-  /dev/cu.usbmodem1301  |  IFX CDC  |  USB VID:PID=058B:0251  <-- INFINEON
-
-STEP 2 — Open and inspect
-  [OK] Port opened @ 115200 baud
-  [?]  Zero bytes received  ← NORMAL, see Key hardware fact above
-
-STEP 3 — USB tree check
-  [OK] Infineon USB entry found
-
-STEP 4 — SDK check
-  [--] ifxradarsdk  MISSING  ← expected on macOS (SDK is Windows-only)
-```
-
-### Run individual scripts
-
-```bash
-python detect_ports.py     # confirm port is visible
-python inspect_serial.py   # multi-baud scan, saves raw_serial_log.bin
-python usb_check.py        # full USB tree dump
-python sdk_check.py        # check which packages are installed
-```
-
----
-
-## Phase 2 — SDK integration (Windows only)
-
-### Why Windows only?
-
-The Infineon Radar SDK (`ifxradarsdk`) is distributed as a Windows-only installer from:
-**https://softwaretools.infineon.com/tools/com.ifx.tb.tool.ifxradarsdk**
-
-It includes:
-- `ifxradarsdk` Python wheel (Windows x64)
-- USB driver (WinUSB / libusb-win32) — required for the bulk transfer endpoint
-- Radar Fusion GUI — a standalone app to verify hardware before writing any code
-
-### Windows setup checklist (do this tomorrow)
+The RDK installer places the SDK at:
 
 ```
-[ ] 1. Download and run the Infineon Radar SDK installer from the link above
-[ ] 2. During install, let it install the USB driver (WinUSB) — required
-[ ] 3. Open a cmd/PowerShell and run:
-         pip install <path-to-sdk>\python\ifxradarsdk-*.whl
-[ ] 4. Plug in the BGT60TR13C board
-[ ] 5. Open Device Manager → confirm board appears under "Universal Serial Bus devices"
-        (NOT under "Ports (COM & LPT)" — it needs WinUSB, not CDC)
-[ ] 6. Run Radar Fusion GUI first to confirm the hardware works end-to-end
-[ ] 7. Then run: python sdk_check.py
-[ ] 8. Then run: python avian_test.py
-[ ] 9. Then run: streamlit run app.py
+C:\Infineon\Tools\Radar-Development-Kit\3.6.5\assets\software\radar_sdk.zip
 ```
 
-### Install pyserial + other deps on Windows too
-
-```cmd
-pip install pyserial numpy streamlit matplotlib
-```
-
-### avian_test.py — what it does
-
-```bash
-python avian_test.py           # real hardware (SDK required)
-python avian_test.py --sim     # simulation mode, no hardware needed
-python avian_test.py --frames 50   # capture 50 frames
-```
-
-When the SDK is installed and the board is connected it will:
-1. Find the device automatically by VID:PID (no COM port needed)
-2. Configure a simple FMCW sequence (32 chirps, 64 samples, 60–61.5 GHz)
-3. Read N frames and print peak range bin per RX antenna
-4. Show how to convert raw ADC data → Range-Doppler map
-
----
-
-## Phase 3 — Streamlit heatmap GUI
-
-### Run the demo (simulation, works right now on macOS)
-
-```bash
-streamlit run app.py
-```
-
-Opens in browser at `http://localhost:8501`
-
-### What you see
-
-- A live-updating Range-Doppler heatmap
-- Sidebar controls: range bins, doppler bins, FPS, color scale, dB/linear
-- Simulated targets moving around — looks exactly like real radar output
-- Start/Stop buttons
-
-### Where to plug in real radar data (Phase 2)
-
-In [app.py](app.py), find `get_real_sdk_frame()` — it has a comment block showing exactly what to replace:
+The Python wheel is bundled inside that zip. Extract and install it into your venv:
 
 ```python
-# *** PHASE 2: REPLACE THIS WITH REAL SDK CODE ***
-# raw_frame = device.get_next_frame()
-# rx0 = raw_frame[0]   # shape: (num_chirps, num_samples)
-# range_fft = np.fft.fft(rx0, axis=1)[:, :num_samples//2]
-# rd_map = np.fft.fftshift(np.fft.fft(range_fft, axis=0), axes=0)
-# return np.abs(rd_map)
+# extract_and_install.py does this automatically:
+python extract_and_install.py
+```
+
+Or manually:
+
+```cmd
+# Extract the wheel from the zip, then:
+.venv\Scripts\python.exe -m pip install ifxradarsdk-3.6.4+4b4a6245-py3-none-win_amd64.whl
+```
+
+### 2. Install other dependencies
+
+```cmd
+.venv\Scripts\python.exe -m pip install pyserial numpy streamlit matplotlib
+```
+
+### 3. Verify everything
+
+```cmd
+.venv\Scripts\python.exe sdk_check.py
+```
+
+Expected output:
+
+```
+[OK] ifxradarsdk                    — version: unknown
+[OK] ifxradarsdk.fmcw               — version: unknown
+[OK] ifxAvian                       — version: unknown
+[OK] numpy — 2.4.2
+[OK] matplotlib — ...
+[OK] streamlit — ...
+[OK] serial — ...
+```
+
+---
+
+## Running
+
+### Board detection
+
+```cmd
+.venv\Scripts\python.exe detect_ports.py
+```
+
+Expected:
+```
+  Device     : COM3
+  HWID       : USB VID:PID=058B:0251 ...  <-- INFINEON BGT60TR13C DETECTED
+```
+
+### Frame capture (CLI)
+
+```cmd
+.venv\Scripts\python.exe avian_test.py              # real hardware
+.venv\Scripts\python.exe avian_test.py --sim        # simulation, no hardware needed
+.venv\Scripts\python.exe avian_test.py --frames 50  # capture 50 frames
+```
+
+Real hardware output:
+```
+[OK] Device found!
+     Sensor: BGT60TR13C FMCW Radar Sensor
+[*] Capturing 10 frames...
+  Frame 000:  RX0: peak@bin0=1.529  RX1: peak@bin0=1.686  RX2: peak@bin0=0.495
+  ...
+[OK] Capture complete.
+```
+
+### Streamlit heatmap GUI
+
+```cmd
+.venv\Scripts\python.exe -m streamlit run app.py
+```
+
+Opens at `http://localhost:8501`
+
+In the sidebar, select **Real SDK (ifxradarsdk)** then click **Start**.
+
+---
+
+## SDK frame format
+
+`device.get_next_frame()` returns:
+
+```python
+frame = device.get_next_frame()
+# frame: list of length 1
+# frame[0]: numpy array, shape (num_rx=3, num_chirps=32, num_samples=64)
+
+rx_data = frame[0]          # (3, 32, 64)
+rx0     = rx_data[0]        # (32, 64) — RX antenna 0
+```
+
+### Range-Doppler map (as used in app.py)
+
+```python
+win_range   = np.hanning(rx0.shape[1])
+win_doppler = np.hanning(rx0.shape[0])
+windowed    = rx0 * win_range[np.newaxis, :] * win_doppler[:, np.newaxis]
+
+range_fft = np.fft.fft(windowed, axis=1)[:, :rx0.shape[1] // 2]   # one-sided
+rd_map    = np.fft.fftshift(np.fft.fft(range_fft, axis=0), axes=0) # centred Doppler
+power     = np.abs(rd_map)  # shape: (32, 32)
 ```
 
 ---
@@ -194,16 +201,16 @@ In [app.py](app.py), find `get_real_sdk_frame()` — it has a comment block show
 
 | Parameter | Value |
 |---|---|
-| Frequency | 57–64 GHz (typical config: 60–61.5 GHz) |
+| Frequency | 57–64 GHz (configured: 60–61.5 GHz) |
 | Range resolution | ~10 cm (depends on bandwidth) |
 | Max range (DEMO) | ~3–5 m |
 | RX antennas | 3 |
 | TX antennas | 1 |
 | USB VID:PID | 058B:0251 |
-| CDC port (macOS) | /dev/cu.usbmodem1301 |
-| CDC port (Windows) | COMx (varies) |
+| CDC port (Windows) | COM3 (may vary) |
 | Data interface | USB Bulk (NOT CDC serial) |
-| SDK package | ifxradarsdk (Windows only) |
+| SDK package | ifxradarsdk 3.6.4 |
+| SDK source | `C:\Infineon\...\radar_sdk.zip` → `python_wheels\` |
 
 ---
 
@@ -211,41 +218,39 @@ In [app.py](app.py), find `get_real_sdk_frame()` — it has a comment block show
 
 ### Board not detected at all
 - Use a data USB cable (not charge-only)
-- Try a direct USB-A port (avoid hubs on macOS)
+- Try a different USB port (avoid hubs)
 - Power-cycle the board after plugging in
 
-### Port disappears after a few seconds
-- Normal if the CDC driver is not loaded — install WinUSB on Windows
-
 ### SDK says "device not found"
-- WinUSB driver not installed — re-run SDK installer, choose driver install
-- Board connected to a hub — try direct connection
-- Another process holds the device — close Radar Fusion GUI
+- WinUSB driver not installed — re-run the RDK installer and allow driver install
+- Another process holds the device — close Radar Fusion GUI before running Python
+- Board connected via hub — try direct connection
 
 ### Zero bytes from pyserial
-- Expected. See "Key hardware fact" at the top. Use the SDK.
+- Expected. The BGT60TR13C sends radar data over USB bulk transfer, not CDC serial. Use the SDK.
 
-### Streamlit heatmap looks wrong with real data
-- Check `rx_mask` in `avian_test.py` — should be 7 (all 3 RX) for BGT60TR13C
-- Check `num_samples` matches your config
+### Peak always at bin 0
+- Normal for an empty room — bin 0 is DC/LO leakage. Place an object in front of the sensor to see a peak at a higher range bin.
+
+### Streamlit heatmap looks wrong
+- `rx_mask=7` uses all 3 RX antennas; `app.py` currently uses RX0 only for the map
 - Range FFT output shape is `(num_chirps, num_samples // 2)` — one-sided
 
 ---
 
 ## Quick command reference
 
-```bash
+```cmd
 # Diagnosis
-python test.py
-python detect_ports.py
-python inspect_serial.py
-python usb_check.py       # macOS only
+.venv\Scripts\python.exe test.py
+.venv\Scripts\python.exe detect_ports.py
+.venv\Scripts\python.exe usb_check.py
 
 # SDK
-python sdk_check.py
-python avian_test.py --sim        # no hardware
-python avian_test.py              # real hardware (Windows + SDK)
+.venv\Scripts\python.exe sdk_check.py
+.venv\Scripts\python.exe avian_test.py --sim
+.venv\Scripts\python.exe avian_test.py
 
 # GUI
-streamlit run app.py
+.venv\Scripts\python.exe -m streamlit run app.py
 ```

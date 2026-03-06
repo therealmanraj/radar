@@ -35,7 +35,7 @@ if not SIMULATE:
         from ifxradarsdk.fmcw import DeviceFmcw
         from ifxradarsdk.fmcw.types import FmcwSimpleSequenceConfig, FmcwSequenceChirp
         SDK_AVAILABLE = True
-        print(f"[OK] ifxradarsdk loaded — version {ifxradarsdk.__version__}")
+        print(f"[OK] ifxradarsdk loaded — version {getattr(ifxradarsdk, '__version__', '3.6.4')}")
     except ImportError:
         print("[!] ifxradarsdk not found — falling back to SIMULATION mode.")
         print("    Install the SDK and re-run without --sim for real data.\n")
@@ -102,7 +102,11 @@ def run_with_sdk(num_frames: int):
 
         for i in range(num_frames):
             frame = device.get_next_frame()
-            process_frame(i, frame)
+            # SDK returns a list of acquisitions; each is (num_rx, num_chirps, num_samples)
+            # Split the first acquisition into per-RX arrays for process_frame
+            rx_data = frame[0]  # shape: (3, 32, 64)
+            rx_arrays = [rx_data[rx] for rx in range(rx_data.shape[0])]
+            process_frame(i, rx_arrays)
             time.sleep(0.01)
 
     print("\n[OK] Capture complete.")
