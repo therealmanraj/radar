@@ -180,8 +180,13 @@ if st.session_state.running:
             from ifxradarsdk.fmcw.types import FmcwSimpleSequenceConfig, FmcwSequenceChirp
 
             with DeviceFmcw() as device:
+                # Keep radar frame rate at a safe fixed value (5 fps = 200 ms).
+                # The UI fps slider only affects how often we redraw, not how
+                # fast the sensor acquires — acquiring too fast overflows the
+                # USB buffer and causes IFX_ERROR_FRAME_ACQUISITION_FAILED.
+                RADAR_FPS = 5
                 config = FmcwSimpleSequenceConfig(
-                    frame_repetition_time_s=1.0 / fps,
+                    frame_repetition_time_s=1.0 / RADAR_FPS,
                     chirp_repetition_time_s=0.5e-3,
                     num_chirps=NUM_CHIRPS,
                     tdm_mimo=False,
@@ -202,14 +207,10 @@ if st.session_state.running:
                 device.set_acquisition_sequence(sequence)
 
                 while st.session_state.running:
-                    t0 = time.time()
-                    raw = device.get_next_frame()
+                    raw = device.get_next_frame()  # blocks until next frame is ready
                     rd = compute_rd_map(raw)
                     display = 20 * np.log10(np.clip(rd, 1e-6, None)) if log_scale else rd
                     render_frame(display)
-                    elapsed = time.time() - t0
-                    if frame_delay - elapsed > 0:
-                        time.sleep(frame_delay - elapsed)
 
         except Exception as e:
             st.error(f"SDK error: {e}")
