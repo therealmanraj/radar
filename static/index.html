@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BGT60TR13C Radar Dashboard</title>
+
+  <!-- Plotly.js — only needed for PlotlyRenderer.
+       When you switch to CanvasRenderer you can remove this line. -->
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Reset & base                                                        */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #09090f;
+      --surface:   #12121e;
+      --border:    #1e1e30;
+      --accent:    #00e5ff;
+      --accent2:   #7b2fff;
+      --text:      #cdd3de;
+      --muted:     #5a6175;
+      --ok:        #00c98a;
+      --err:       #ff4f5e;
+      --font-mono: 'Courier New', Courier, monospace;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 13px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Layout                                                              */
+    /* ------------------------------------------------------------------ */
+    .layout {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      grid-template-columns: 1fr 200px;
+      grid-template-areas:
+        "header  header"
+        "chart   sidebar";
+      height: 100vh;
+      gap: 8px;
+      padding: 8px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Header                                                              */
+    /* ------------------------------------------------------------------ */
+    header {
+      grid-area: header;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+
+    header h1 {
+      font-size: 15px;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+    }
+
+    header span.sub {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .status {
+      margin-left: auto;
+      padding: 3px 10px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 0.06em;
+    }
+
+    .status.ok  { background: #00c98a22; color: var(--ok);  border: 1px solid var(--ok); }
+    .status.err { background: #ff4f5e22; color: var(--err); border: 1px solid var(--err); }
+
+    /* ------------------------------------------------------------------ */
+    /* Chart area                                                          */
+    /* ------------------------------------------------------------------ */
+    #radar-container {
+      grid-area: chart;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      /* Plotly and Canvas both fill this element */
+      min-height: 0;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Sidebar stats                                                        */
+    /* ------------------------------------------------------------------ */
+    .sidebar {
+      grid-area: sidebar;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+
+    .card-label {
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .card-value {
+      font-size: 22px;
+      color: var(--accent);
+      letter-spacing: 0.05em;
+    }
+
+    .card-unit {
+      font-size: 11px;
+      color: var(--muted);
+      margin-left: 2px;
+    }
+
+    /* renderer badge */
+    .renderer-badge {
+      margin-top: auto;
+      padding: 8px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    .renderer-badge strong {
+      color: var(--accent2);
+    }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+
+  <header>
+    <h1>BGT60TR13C &mdash; RADAR DASHBOARD</h1>
+    <span class="sub">Infineon XENSIV™ 60 GHz FMCW &nbsp;|&nbsp; Range-Doppler</span>
+    <span class="status err" id="status">Connecting…</span>
+  </header>
+
+  <div id="radar-container"></div>
+
+  <aside class="sidebar">
+
+    <div class="card">
+      <div class="card-label">Frame</div>
+      <div class="card-value" id="stat-frame">—</div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Render FPS</div>
+      <div class="card-value" id="stat-fps">—<span class="card-unit">fps</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Peak power</div>
+      <div class="card-value" id="stat-peak">—</div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Peak range bin</div>
+      <div class="card-value" id="stat-bin">—</div>
+    </div>
+
+    <div class="renderer-badge">
+      Renderer:<br>
+      <strong id="renderer-name">PlotlyRenderer</strong><br>
+      <span style="color:#3a3a5c;margin-top:4px;display:block;">
+        Swap in app.js → CanvasRenderer for 2× speed
+      </span>
+    </div>
+
+  </aside>
+
+</div>
+
+<!-- ES module — Plotly must be loaded via script tag above, not import -->
+<script type="module" src="/js/app.js"></script>
+
+</body>
+</html>
