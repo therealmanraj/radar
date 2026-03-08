@@ -1,114 +1,200 @@
 /**
  * app.js
  * ------
- * WebSocket client + renderer orchestrator.
+ * Device detection → connect flow → WebSocket stream.
  *
- * ┌─────────────────────────────────────────────────────────────┐
- * │  To switch renderer:  change ONE import + ONE constructor   │
- * │                                                             │
- * │  Current:  PlotlyRenderer  (Plotly.js heatmap)              │
- * │  Upgrade:  CanvasRenderer  (Canvas 2D — see below)          │
- * └─────────────────────────────────────────────────────────────┘
+ * LED states
+ * ----------
+ *   idle      — no device detected (amber, slow pulse)
+ *   detected  — device found, not connected (dim white, slow pulse)
+ *   connected — streaming (solid white, static)
+ *   error     — connection failed (red, fast blink)
+ *
+ * Renderer is imported but not used yet (graph is removed for now).
+ * Uncomment the renderer lines when the graph step is added back.
  */
 
-// ── Renderer selection ──────────────────────────────────────────────────────
-import { PlotlyRenderer }  from './renderers/plotly_renderer.js';
-// import { CanvasRenderer } from './renderers/canvas_renderer.js';  // ← swap here
-
-const RENDERER = new PlotlyRenderer();
-// const RENDERER = new CanvasRenderer();                            // ← and here
-
-
 // ── DOM refs ────────────────────────────────────────────────────────────────
-const radarEl    = document.getElementById('radar-container');
-const statusEl   = document.getElementById('status');
-const statFrame  = document.getElementById('stat-frame');
-const statFps    = document.getElementById('stat-fps');
-const statPeak   = document.getElementById('stat-peak');
-const statBin    = document.getElementById('stat-bin');
-
+const ledEl      = document.getElementById('led');
+const labelEl    = document.getElementById('led-label');
+const nameEl     = document.getElementById('device-name');
+const descEl     = document.getElementById('device-desc');
+const actionBtn  = document.getElementById('action-btn');
+const logEl      = document.getElementById('log-msg');
 
 // ── State ───────────────────────────────────────────────────────────────────
-let initialized   = false;
-let serverConfig  = {};
-let lastFrameTime = performance.now();
 let ws            = null;
+let pollTimer     = null;
+let appState      = 'idle';      // 'idle' | 'detected' | 'connected' | 'error'
+let lastDetected  = false;
 
-
-// ── FPS smoothing (rolling average over 10 frames) ──────────────────────────
-const FPS_WINDOW   = 10;
-const fpsHistory   = new Float32Array(FPS_WINDOW);
-let   fpsIdx       = 0;
-
-function recordFps() {
-  const now  = performance.now();
-  const dt   = now - lastFrameTime;
-  lastFrameTime = now;
-  fpsHistory[fpsIdx % FPS_WINDOW] = 1000 / dt;
-  fpsIdx++;
-  const count = Math.min(fpsIdx, FPS_WINDOW);
-  let sum = 0;
-  for (let i = 0; i < count; i++) sum += fpsHistory[i];
-  return Math.round(sum / count);
+// ── Logging ─────────────────────────────────────────────────────────────────
+function log(msg) {
+  logEl.textContent = msg;
+  console.log('[radar]', msg);
 }
 
+// ── LED state machine ────────────────────────────────────────────────────────
+const STATE_META = {
+  idle: {
+    ledClass:   'idle',
+    labelClass: 'idle',
+    labelText:  'No device',
+    btnText:    'Connect',
+    btnClass:   'btn-connect',
+    btnEnabled: false,
+  },
+  detected: {
+    ledClass:   'detected',
+    labelClass: 'detected',
+    labelText:  'Device found',
+    btnText:    'Connect',
+    btnClass:   'btn-connect',
+    btnEnabled: true,
+  },
+  connected: {
+    ledClass:   'connected',
+    labelClass: 'connected',
+    labelText:  'Connected',
+    btnText:    'Disconnect',
+    btnClass:   'btn-disconnect',
+    btnEnabled: true,
+  },
+  error: {
+    ledClass:   'error',
+    labelClass: 'error',
+    labelText:  'Error',
+    btnText:    'Retry',
+    btnClass:   'btn-retry',
+    btnEnabled: true,
+  },
+};
 
-// ── WebSocket connection ─────────────────────────────────────────────────────
-function connect() {
+function setState(newState, desc = null) {
+  appState = newState;
+  const m  = STATE_META[newState];
+
+  // LED
+  ledEl.className   = 'led ' + m.ledClass;
+  labelEl.className = 'led-label ' + m.labelClass;
+  labelEl.textContent = m.labelText;
+
+  // Button
+  actionBtn.textContent = m.btnText;
+  actionBtn.className   = 'btn ' + m.btnClass;
+  actionBtn.disabled    = !m.btnEnabled;
+
+  // Optional description override
+  if (desc !== null) descEl.textContent = desc;
+}
+
+// ── Device polling ───────────────────────────────────────────────────────────
+async function pollDevice() {
+  try {
+    const res  = await fetch('/device/status');
+    const data = await res.json();
+
+    // Don't update LED while we're actively connected
+    if (appState === 'connected') return;
+
+    if (data.detected) {
+      lastDetected = true;
+      descEl.textContent = data.description || 'Device ready';
+      if (appState !== 'detected') {
+        setState('detected');
+        log(`Device detected: ${data.description}`);
+      }
+    } else {
+      lastDetected = false;
+      if (appState !== 'idle') {
+        setState('idle', 'No Infineon radar device found');
+        log('No device found — polling…');
+      }
+    }
+  } catch {
+    log('Could not reach server — retrying…');
+  }
+}
+
+// ── WebSocket stream ─────────────────────────────────────────────────────────
+function openStream() {
+  if (ws) { ws.close(); ws = null; }
+
   const url = `ws://${location.host}/ws`;
   ws = new WebSocket(url);
 
-  ws.onopen = () => setStatus('Connected', true);
+  ws.onopen = () => {
+    setState('connected', descEl.textContent);
+    log('WebSocket connected — receiving frames');
+  };
 
   ws.onclose = () => {
-    setStatus('Disconnected — reconnecting…', false);
-    setTimeout(connect, 2000);
+    if (appState === 'connected') {
+      // Unexpected close
+      setState('error', 'Stream closed unexpectedly');
+      log('WebSocket closed — click Retry to reconnect');
+    }
   };
 
-  ws.onerror = () => setStatus('Connection error', false);
+  ws.onerror = () => {
+    setState('error', 'WebSocket error');
+    log('WebSocket error');
+  };
 
-  ws.onmessage = (event) => {
-    const { z, meta } = JSON.parse(event.data);
+  ws.onmessage = (_event) => {
+    // Frame data arrives here.
+    // Renderer will be wired up here in the next step (graph re-add).
+    // const { z, meta } = JSON.parse(_event.data);
+  };
+}
 
-    // First frame: initialise the renderer with real grid dimensions
-    if (!initialized) {
-      RENDERER.init(radarEl, {
-        rows:        meta.rows,
-        cols:        meta.cols,
-        colorscale:  'Viridis',
-        logScale:    serverConfig.log_scale ?? true,
-      });
-      initialized = true;
+function closeStream() {
+  if (ws) { ws.close(); ws = null; }
+}
+
+// ── Button handler ───────────────────────────────────────────────────────────
+actionBtn.addEventListener('click', async () => {
+  if (appState === 'detected' || appState === 'idle') {
+    // ── Connect ──
+    actionBtn.disabled = true;
+    log('Sending connect request…');
+    try {
+      const res  = await fetch('/device/connect', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        openStream();
+      } else {
+        setState('error', data.error || 'Connect failed');
+        log(`Connect failed: ${data.error}`);
+      }
+    } catch (e) {
+      setState('error', 'Server unreachable');
+      log('Connect request failed');
     }
 
-    RENDERER.update(z, meta);
+  } else if (appState === 'connected') {
+    // ── Disconnect ──
+    log('Disconnecting…');
+    closeStream();
+    try {
+      await fetch('/device/disconnect', { method: 'POST' });
+    } catch { /* best effort */ }
+    setState('detected', descEl.textContent);
+    log('Disconnected');
 
-    // Update stats panel
-    const fps = recordFps();
-    statFrame.textContent = meta.frame;
-    statFps.textContent   = fps;
-    statPeak.textContent  = meta.peak.toFixed(1) + (meta.log_scale ? ' dB' : '');
-    statBin.textContent   = meta.peak_range_bin;
-  };
-}
-
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-function setStatus(text, ok) {
-  statusEl.textContent  = text;
-  statusEl.className    = 'status ' + (ok ? 'ok' : 'err');
-}
-
+  } else if (appState === 'error') {
+    // ── Retry ──
+    setState(lastDetected ? 'detected' : 'idle');
+    log('Retrying…');
+  }
+});
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 async function boot() {
-  try {
-    const res    = await fetch('/config');
-    serverConfig = await res.json();
-  } catch {
-    console.warn('Could not fetch /config — using defaults');
-  }
-  connect();
+  log('Starting — scanning for devices…');
+  await pollDevice();
+  // Poll every 3 seconds to detect plug/unplug
+  pollTimer = setInterval(pollDevice, 3000);
 }
 
 boot();
