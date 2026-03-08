@@ -108,5 +108,5 @@ class InfineonRadar(RadarSource):
 
     def close(self) -> None:
         if self._device is not None:
-            self._device.close()
+            self._device._close()   # SDK uses _close(), not close()
             self._device = None
