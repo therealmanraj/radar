@@ -35,7 +35,7 @@ const dActivityText = document.getElementById('d-activity-text');
 const RANGE_CM_PER_BIN = 10;          // 0.1 m/bin × 100
 const V_MAX_KMH        = 8.89;        // ±8.89 km/h across 32 doppler bins
 const DOPPLER_CENTRE   = 16;          // bin 16 = zero velocity (fftshift)
-const ACTIVITY_THRESH_DB = 10;        // dB above session baseline → activity
+const ACTIVITY_THRESH_DB = 6;         // dB above baseline in motion bins → activity
 
 // Rolling session stats for the signal bar and baseline
 let sessionPeakMax = -Infinity;
@@ -192,28 +192,29 @@ function openStream() {
   ws.onmessage = (event) => {
     const { meta } = JSON.parse(event.data);
 
-    // ── Establish baseline from first 10 frames (noise floor) ──────────
+    // ── Establish baseline from first 10 frames (empty scene) ──────────
+    // Use motion_peak for baseline — it's the clutter-rejected value
     if (baselineFrames < 10) {
-      baselineSum += meta.peak;
+      baselineSum += meta.motion_peak;
       baselineFrames++;
       if (baselineFrames === 10) baselinePeak = baselineSum / 10;
       return;
     }
 
-    // ── Convert bins → physical units ───────────────────────────────────
-    const rangeCm = (meta.peak_range_bin * RANGE_CM_PER_BIN).toFixed(0);
-    const velBin  = meta.peak_doppler_bin - DOPPLER_CENTRE;
+    // ── Convert bins → physical units (motion-peak bins) ────────────────
+    const rangeCm = (meta.motion_range_bin * RANGE_CM_PER_BIN).toFixed(0);
+    const velBin  = meta.motion_doppler_bin - DOPPLER_CENTRE;
     const velKmh  = (velBin / DOPPLER_CENTRE * V_MAX_KMH).toFixed(1);
     const velSign = velBin > 0 ? '+' : '';
 
-    // ── Signal bar (normalised to session min/max) ───────────────────────
-    sessionPeakMax = Math.max(sessionPeakMax, meta.peak);
-    sessionPeakMin = Math.min(sessionPeakMin, meta.peak);
+    // ── Signal bar — normalised to session motion_peak min/max ───────────
+    sessionPeakMax = Math.max(sessionPeakMax, meta.motion_peak);
+    sessionPeakMin = Math.min(sessionPeakMin, meta.motion_peak);
     const range = sessionPeakMax - sessionPeakMin || 1;
-    const pct   = ((meta.peak - sessionPeakMin) / range * 100).toFixed(1);
+    const pct   = ((meta.motion_peak - sessionPeakMin) / range * 100).toFixed(1);
 
-    // ── Activity detection (peak > baseline + threshold) ─────────────────
-    const isActive = meta.peak > baselinePeak + ACTIVITY_THRESH_DB;
+    // ── Activity detection — motion_peak vs. quiet baseline ──────────────
+    const isActive = meta.motion_peak > baselinePeak + ACTIVITY_THRESH_DB;
 
     // ── FPS ──────────────────────────────────────────────────────────────
     fpsFrames++;
@@ -222,7 +223,7 @@ function openStream() {
     lastFrameTime = now;
 
     // ── Update DOM ───────────────────────────────────────────────────────
-    dPeak.textContent = meta.peak.toFixed(1);
+    dPeak.textContent = meta.motion_peak.toFixed(1);
     dRange.textContent = rangeCm;
     dVel.textContent  = velSign + velKmh;
     dBar.style.width  = pct + '%';

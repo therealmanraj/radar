@@ -166,18 +166,32 @@ def _radar_reader(
 
             raw     = source.get_frame()
             display = 20.0 * np.log10(np.clip(raw, 1e-6, None)) if log_scale else raw
+
+            # ── Global peak (includes static clutter) ────────────────────────
             peak_idx = np.unravel_index(display.argmax(), display.shape)
+
+            # ── Motion peak — mask ±4 doppler bins around zero-velocity ──────
+            # Shape is (num_doppler, num_range).  After fftshift, zero-velocity
+            # is at row  num_doppler // 2.  Masking it reveals the moving-target
+            # peak which is what matters for hand detection at 30 cm.
+            zero_vel_row  = display.shape[0] // 2
+            motion_mask   = display.copy()
+            motion_mask[zero_vel_row - 4 : zero_vel_row + 5, :] = display.min()
+            motion_idx    = np.unravel_index(motion_mask.argmax(), motion_mask.shape)
 
             payload = {
                 "z": display.tolist(),
                 "meta": {
-                    "frame":           frame_index,
-                    "rows":            display.shape[0],
-                    "cols":            display.shape[1],
-                    "peak":            float(display.max()),
-                    "peak_range_bin":  int(peak_idx[1]),
-                    "peak_doppler_bin": int(peak_idx[0]),
-                    "log_scale":       log_scale,
+                    "frame":              frame_index,
+                    "rows":               display.shape[0],
+                    "cols":               display.shape[1],
+                    "peak":               float(display.max()),
+                    "peak_range_bin":     int(peak_idx[1]),
+                    "peak_doppler_bin":   int(peak_idx[0]),
+                    "motion_peak":        float(motion_mask.max()),
+                    "motion_range_bin":   int(motion_idx[1]),
+                    "motion_doppler_bin": int(motion_idx[0]),
+                    "log_scale":          log_scale,
                 },
             }
 

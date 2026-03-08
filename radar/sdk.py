@@ -47,7 +47,8 @@ class InfineonRadar(RadarSource):
     """
 
     def __init__(self):
-        self._device = None
+        self._device     = None
+        self._background = None   # EMA of raw ADC data for MTI clutter rejection
 
     def open(self) -> None:
         from ifxradarsdk.fmcw import DeviceFmcw
@@ -79,32 +80,48 @@ class InfineonRadar(RadarSource):
     def get_frame(self) -> np.ndarray:
         """
         Read one frame and return a Range-Doppler magnitude map.
-        Shape: (range_bins, vel_bins) = (NUM_SAMPLES//2, NUM_CHIRPS) = (32, 32)
+        Output shape: (num_chirps, range_bins) = (32, 32)
+          axis 0 = Doppler / velocity   (row 16 = zero velocity after fftshift)
+          axis 1 = range bins           (bin 0 = closest, bin 31 = ~3.2 m)
 
-        Processing pipeline matches old/app.py compute_rd_map():
-          1. Take RX0 from the first acquisition  shape: (num_chirps, num_samples)
-          2. Apply Hanning window on both axes
-          3. Range FFT → one-sided
-          4. Doppler FFT → fftshift (zero-velocity centred)
-          5. Transpose → (range_bins, vel_bins)
+        Pipeline improvements vs. old/app.py:
+          1. Average all 3 RX antennas  → +4.8 dB SNR vs. single antenna
+          2. MTI clutter filter          → exponential moving average subtracted
+             from the raw ADC data to reject static reflections (desk, walls)
+             that would otherwise swamp the hand signal at 30 cm
+          3. Hanning windows on both axes
+          4. Range FFT (one-sided) + Doppler FFT (fftshift)
         """
         raw     = self._device.get_next_frame()   # blocks until board is ready
-        rx_data = raw[0]                           # (num_rx, num_chirps, num_samples)
-        rx0     = rx_data[0].astype(float)         # (32, 64) — use RX0 only
+        rx_data = raw[0].astype(float)             # (num_rx, num_chirps, num_samples)
 
-        # Hanning windows — same as old/app.py
-        win_range   = np.hanning(rx0.shape[1])                  # (64,)
-        win_doppler = np.hanning(rx0.shape[0])                  # (32,)
-        windowed    = rx0 * win_range[np.newaxis, :] * win_doppler[:, np.newaxis]
+        # ── Step 1: average all RX antennas for +4.8 dB SNR ────────────────
+        rx_avg = np.mean(rx_data, axis=0)          # (32, 64)
 
-        # Range FFT — one-sided (positive ranges only)
-        range_fft = np.fft.fft(windowed, axis=1)[:, : rx0.shape[1] // 2]
+        # ── Step 2: MTI clutter filter ──────────────────────────────────────
+        # The EMA tracks the slow-changing static environment.
+        # Subtracting it highlights fast-changing targets (moving hand).
+        # alpha=0.85 at 5 fps → time constant ≈ 1.3 s (adapts to slow drift,
+        # ignores hand movement which changes every frame).
+        if self._background is None:
+            self._background = rx_avg.copy()
+            return np.zeros((NUM_CHIRPS, NUM_SAMPLES // 2))  # skip first frame
 
-        # Doppler FFT — fftshift centres zero-velocity
+        mti = rx_avg - self._background
+        self._background = 0.85 * self._background + 0.15 * rx_avg
+
+        # ── Step 3: Hanning windows ─────────────────────────────────────────
+        win_range   = np.hanning(mti.shape[1])    # (64,)
+        win_doppler = np.hanning(mti.shape[0])    # (32,)
+        windowed    = mti * win_range[np.newaxis, :] * win_doppler[:, np.newaxis]
+
+        # ── Step 4: Range FFT → one-sided ───────────────────────────────────
+        range_fft = np.fft.fft(windowed, axis=1)[:, : mti.shape[1] // 2]
+
+        # ── Step 5: Doppler FFT — fftshift puts zero-velocity at row 16 ─────
         rd_map = np.fft.fftshift(np.fft.fft(range_fft, axis=0), axes=0)
 
-        # Transpose: (num_chirps, range_bins) → (range_bins, vel_bins)
-        return np.abs(rd_map).T   # (32, 32)
+        return np.abs(rd_map)   # (num_chirps=32, range_bins=32)  NO transpose
 
     def close(self) -> None:
         if self._device is not None:
