@@ -21,6 +21,7 @@ const nameEl     = document.getElementById('device-name');
 const descEl     = document.getElementById('device-desc');
 const actionBtn  = document.getElementById('action-btn');
 const logEl      = document.getElementById('log-msg');
+const cardEl     = document.querySelector('.device-card');
 
 // ── State ───────────────────────────────────────────────────────────────────
 let ws            = null;
@@ -74,12 +75,23 @@ function setState(newState, desc = null) {
   appState = newState;
   const m  = STATE_META[newState];
 
-  // LED
-  ledEl.className   = 'led ' + m.ledClass;
-  labelEl.className = 'led-label ' + m.labelClass;
+  // ── LED — force animation restart ───────────────────────────────────────
+  // Browsers reuse the running animation timeline when you swap CSS classes.
+  // Setting animation:none + reading offsetHeight triggers a reflow that
+  // flushes the old animation, so the new class animation starts from frame 0.
+  ledEl.style.animation = 'none';
+  ledEl.className       = 'led ' + m.ledClass;
+  ledEl.offsetHeight;          // force reflow — do NOT remove this line
+  ledEl.style.animation = '';  // hand control back to the CSS class
+
+  // ── Label ────────────────────────────────────────────────────────────────
+  labelEl.className   = 'led-label ' + m.labelClass;
   labelEl.textContent = m.labelText;
 
-  // Button
+  // ── Card border ──────────────────────────────────────────────────────────
+  cardEl.className = 'device-card ' + newState;
+
+  // ── Button ───────────────────────────────────────────────────────────────
   actionBtn.textContent = m.btnText;
   actionBtn.className   = 'btn ' + m.btnClass;
   actionBtn.disabled    = !m.btnEnabled;

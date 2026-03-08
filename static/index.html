@@ -93,6 +93,12 @@
       width: 100%;
     }
 
+    /* Card border mirrors LED state */
+    .device-card.idle      { border-color: #2a1a00; }
+    .device-card.detected  { border-color: #3a3a3a; }
+    .device-card.connected { border-color: rgba(255,255,255,0.35); box-shadow: 0 0 32px rgba(255,255,255,0.06); }
+    .device-card.error     { border-color: #5a0010; }
+
     /* ------------------------------------------------------------------ */
     /* LED indicator                                                       */
     /* ------------------------------------------------------------------ */
@@ -104,10 +110,10 @@
     }
 
     .led {
-      width: 22px;
-      height: 22px;
+      width: 36px;
+      height: 36px;
       border-radius: 50%;
-      transition: background 0.3s, box-shadow 0.3s;
+      /* NO transition — it fights with animation when switching states */
     }
 
     /* State: idle — no device detected, slow amber pulse */
