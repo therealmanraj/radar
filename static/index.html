@@ -239,6 +239,125 @@
     .btn-retry      { background: #1e1e2e; color: #c87800; border: 1px solid #c87800; }
 
     /* ------------------------------------------------------------------ */
+    /* Live data panel  (shown only when connected)                       */
+    /* ------------------------------------------------------------------ */
+    .data-panel {
+      display: none;
+      width: 100%;
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 0 16px 48px;
+    }
+
+    .data-panel.visible { display: block; }
+
+    .data-panel-title {
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 12px;
+      text-align: center;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 12px;
+      text-align: center;
+    }
+
+    .stat-card .label {
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .stat-card .value {
+      font-size: 22px;
+      color: #fff;
+      letter-spacing: 0.03em;
+    }
+
+    .stat-card .unit {
+      font-size: 10px;
+      color: var(--muted);
+      margin-left: 2px;
+    }
+
+    /* Signal bar */
+    .bar-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+
+    .bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .bar-track {
+      height: 8px;
+      background: #1a1a2a;
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, #00e5ff 0%, #ffffff 100%);
+      transition: width 0.12s ease-out;
+      width: 0%;
+    }
+
+    /* Activity badge */
+    .activity-badge {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+    }
+
+    .activity-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+      transition: background 0.15s, box-shadow 0.15s;
+    }
+
+    .activity-badge.active .activity-dot {
+      background: #00e5ff;
+      box-shadow: 0 0 8px #00e5ff;
+    }
+
+    .activity-badge.active { color: #ccc; border-color: #00e5ff44; }
+
+    /* ------------------------------------------------------------------ */
     /* Log                                                                 */
     /* ------------------------------------------------------------------ */
     .log-panel {
@@ -289,6 +408,41 @@
 
     </div>
   </main>
+
+  <!-- Live data panel — shown only when WebSocket is connected -->
+  <div class="data-panel" id="data-panel">
+    <div class="data-panel-title">Live Radar Data</div>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="label">Peak signal</div>
+        <div class="value"><span id="d-peak">—</span><span class="unit">dB</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Est. range</div>
+        <div class="value"><span id="d-range">—</span><span class="unit">cm</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Velocity</div>
+        <div class="value"><span id="d-vel">—</span><span class="unit">km/h</span></div>
+      </div>
+    </div>
+
+    <div class="bar-wrap">
+      <div class="bar-label">
+        <span>Signal strength</span>
+        <span id="d-fps">— fps</span>
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill" id="d-bar"></div>
+      </div>
+    </div>
+
+    <div class="activity-badge" id="d-activity">
+      <div class="activity-dot"></div>
+      <span id="d-activity-text">Waiting for signal…</span>
+    </div>
+  </div>
 
   <!-- Status log bar -->
   <div class="log-panel">
