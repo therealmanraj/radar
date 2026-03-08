@@ -67,38 +67,55 @@ _stop_event:   threading.Event             = threading.Event()
 # ---------------------------------------------------------------------------
 def _detect_device() -> dict:
     """
-    Scan USB/serial ports for the Infineon radar board.
-    Infineon Technologies AG USB VID = 0x058B (1419 decimal).
-    Returns a dict with keys: detected, port, description.
+    Detect the BGT60TR13C eval board.
+
+    IMPORTANT: the board communicates via USB bulk transfers, NOT CDC serial.
+    pyserial list_ports will usually NOT find it.
+    The correct approach is to ask the SDK to enumerate devices first.
+
+    VID: 058B  PID: 0251  (from old/detect_ports.py)
+    Description keyword: 'IFX'  (not 'INFINEON')
     """
+
+    # 1. Try SDK enumeration first — most reliable for bulk-transfer devices
+    try:
+        from ifxradarsdk.fmcw import DeviceFmcw
+        ids = DeviceFmcw.get_list()   # list of serial-number strings; empty = no device
+        if ids:
+            return {
+                "detected":    True,
+                "port":        None,
+                "description": f"BGT60TR13C  (SDK serial: {ids[0]})",
+            }
+    except Exception as exc:
+        logger.debug("SDK device scan: %s", exc)
+
+    # 2. Fallback: check serial/USB-serial ports with correct VID:PID + keyword
+    #    (catches boards that enumerate as CDC on some Windows driver combos)
     try:
         from serial.tools import list_ports
         for port in list_ports.comports():
             hwid = (port.hwid        or "").upper()
             desc = (port.description or "").upper()
-            if "058B" in hwid or "INFINEON" in desc or "BGT60" in desc:
+            # VID=058B, PID=0251, or description contains 'IFX' (Infineon prefix)
+            if ("058B" in hwid and "0251" in hwid) or "IFX" in desc or "BGT60" in desc:
                 return {
                     "detected":    True,
                     "port":        port.device,
                     "description": port.description,
                 }
     except Exception as exc:
-        logger.debug("list_ports scan failed: %s", exc)
+        logger.debug("list_ports scan: %s", exc)
 
-    # Fallback: try the SDK's own enumeration (does not open the device)
-    try:
-        from ifxradarsdk.fmcw import DeviceFmcw
-        ids = DeviceFmcw.get_list()          # returns list of device serial numbers
-        if ids:
-            return {"detected": True, "port": None, "description": f"BGT60 SDK device(s): {ids}"}
-    except Exception:
-        pass
-
-    # Simulation mode — device is always "present" for development
+    # 3. Simulation mode — always report "detected" so the UI is usable without hardware
     if CONFIG["source"] == "simulation":
-        return {"detected": True, "port": "SIM", "description": "Simulation (no physical device)"}
+        return {
+            "detected":    True,
+            "port":        "SIM",
+            "description": "Simulation — no physical device required",
+        }
 
-    return {"detected": False, "port": None, "description": "No Infineon radar device found"}
+    return {"detected": False, "port": None, "description": "No BGT60TR13C found"}
 
 
 # ---------------------------------------------------------------------------
