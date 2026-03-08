@@ -35,7 +35,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 from radar.simulation import SimulatedRadar
-# from radar.sdk import InfineonRadar            # ← uncomment for real device
+from radar.sdk import InfineonRadar
 from server.broadcast import ConnectionManager
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # Config
 # ---------------------------------------------------------------------------
 CONFIG: dict = {
-    "source":      "simulation",
+    "source":      "sdk",          # "simulation" | "sdk"
     "num_range":   64,
     "num_doppler": 32,
     "fps":         20,
@@ -124,7 +124,8 @@ def _detect_device() -> dict:
 def _build_source():
     if CONFIG["source"] == "simulation":
         return SimulatedRadar(CONFIG["num_range"], CONFIG["num_doppler"])
-    # return InfineonRadar(CONFIG["num_range"], CONFIG["num_doppler"])
+    if CONFIG["source"] == "sdk":
+        return InfineonRadar()
     raise ValueError(f"Unknown source: {CONFIG['source']}")
 
 
