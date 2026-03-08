@@ -21,7 +21,8 @@ from .base import RadarSource
 # Fixed hardware constants — do NOT change without testing on the board
 NUM_CHIRPS   = 32
 NUM_SAMPLES  = 64
-RADAR_FPS    = 5          # safe max; UI can render faster but SDK runs at 5 Hz
+RADAR_FPS    = 10         # matches Radar Fusion GUI default; safe for our frame size
+                          # (64 samples × 32 chirps × 3 antennas = 6144 bytes < 16k FIFO limit)
 
 # Physical axis constants (matches old/app.py)
 _C           = 3e8
