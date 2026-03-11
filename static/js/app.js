@@ -1,7 +1,7 @@
 /**
  * app.js
  * ------
- * Device detection → connect flow → WebSocket stream.
+ * Device detection → connect flow → WebSocket stream + Range-Doppler heatmap.
  *
  * LED states
  * ----------
@@ -9,10 +9,9 @@
  *   detected  — device found, not connected (dim white, slow pulse)
  *   connected — streaming (solid white, static)
  *   error     — connection failed (red, fast blink)
- *
- * Renderer is imported but not used yet (graph is removed for now).
- * Uncomment the renderer lines when the graph step is added back.
  */
+
+import { PlotlyRenderer } from './renderers/plotly_renderer.js';
 
 // ── DOM refs ────────────────────────────────────────────────────────────────
 const ledEl      = document.getElementById('led');
@@ -51,6 +50,7 @@ let ws            = null;
 let pollTimer     = null;
 let appState      = 'idle';      // 'idle' | 'detected' | 'connected' | 'error'
 let lastDetected  = false;
+let renderer      = null;
 
 // ── Logging ─────────────────────────────────────────────────────────────────
 function log(msg) {
@@ -174,6 +174,11 @@ function openStream() {
   ws.onopen = () => {
     setState('connected', descEl.textContent);
     log('WebSocket connected — receiving frames');
+    // Init heatmap renderer
+    renderer = new PlotlyRenderer();
+    renderer.init(document.getElementById('rd-plot'), {
+      numDoppler: 64, numRange: 32, logScale: true,
+    });
   };
 
   ws.onclose = () => {
@@ -190,7 +195,7 @@ function openStream() {
   };
 
   ws.onmessage = (event) => {
-    const { meta } = JSON.parse(event.data);
+    const { z, meta } = JSON.parse(event.data);
 
     // ── Establish baseline from first 10 frames (empty scene) ──────────
     // Use motion_peak for baseline — it's the clutter-rejected value
@@ -236,11 +241,15 @@ function openStream() {
       dActivity.className       = 'activity-badge';
       dActivityText.textContent = 'No activity — wave your hand over the sensor';
     }
+
+    // ── Update range-doppler heatmap ─────────────────────────────────────
+    if (renderer && z) renderer.update(z);
   };
 }
 
 function closeStream() {
   if (ws) { ws.close(); ws = null; }
+  if (renderer) { renderer.destroy(); renderer = null; }
 }
 
 // ── Button handler ───────────────────────────────────────────────────────────

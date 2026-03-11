@@ -244,7 +244,7 @@
     .data-panel {
       display: none;
       width: 100%;
-      max-width: 640px;
+      max-width: 900px;
       margin: 0 auto;
       padding: 0 16px 48px;
     }
@@ -358,6 +358,18 @@
     .activity-badge.active { color: #ccc; border-color: #00e5ff44; }
 
     /* ------------------------------------------------------------------ */
+    /* Range-Doppler heatmap                                               */
+    /* ------------------------------------------------------------------ */
+    #rd-plot {
+      width: 100%;
+      height: 420px;
+      margin-top: 14px;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #0d0d1a;
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Log                                                                 */
     /* ------------------------------------------------------------------ */
     .log-panel {
@@ -442,6 +454,9 @@
       <div class="activity-dot"></div>
       <span id="d-activity-text">Waiting for signal…</span>
     </div>
+
+    <!-- Range-Doppler heatmap -->
+    <div id="rd-plot"></div>
   </div>
 
   <!-- Status log bar -->
@@ -450,6 +465,7 @@
     <span id="log-msg">Initialising…</span>
   </div>
 
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script type="module" src="/js/app.js"></script>
 
 </body>
