@@ -46,8 +46,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 CONFIG: dict = {
     "source":      "sdk",          # "simulation" | "sdk"
-    "num_range":   64,
-    "num_doppler": 32,
+    "num_range":   32,             # NUM_SAMPLES // 2 = 32 range bins
+    "num_doppler": 64,             # NUM_CHIRPS = 64 with board default config
     "fps":         20,
     "log_scale":   True,
 }

@@ -33,8 +33,8 @@ const dActivityText = document.getElementById('d-activity-text');
 
 // Physics constants — must match radar/sdk.py
 const RANGE_CM_PER_BIN = 10;          // 0.1 m/bin × 100
-const V_MAX_KMH        = 8.89;        // ±8.89 km/h across 32 doppler bins
-const DOPPLER_CENTRE   = 16;          // bin 16 = zero velocity (fftshift)
+const V_MAX_KMH        = 8.89;        // ±8.89 km/h across 64 doppler bins
+const DOPPLER_CENTRE   = 32;          // bin 32 = zero velocity (fftshift on 64 chirps)
 const ACTIVITY_THRESH_DB = 6;         // dB above baseline in motion bins → activity
 
 // Rolling session stats for the signal bar and baseline

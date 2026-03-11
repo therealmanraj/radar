@@ -3,12 +3,9 @@ radar/sdk.py
 ------------
 Infineon BGT60TR13C via the official ifxradarsdk.
 
-Config is derived from the working old/avian_test.py and old/app.py:
-  - num_samples = 64  (NOT num_range * 2 — that overflows the USB buffer)
-  - num_chirps  = 32
-  - rx_mask     = 7   (all 3 RX antennas on the eval board)
-  - fps         = 5   (safe; >10 fps risks IFX_ERROR_FRAME_ACQUISITION_FAILED)
-  - Hanning windows on both range and Doppler axes (reduces sidelobes)
+Uses the board's default configuration — no custom FmcwSimpleSequenceConfig.
+This matches the approach in the working sensor-radar/detect_hand.py and gives
+frame shape (3, 64, 64) = (num_rx, num_chirps, num_samples).
 
 Swap into use in server/app.py:
   from radar.sdk import InfineonRadar
@@ -18,111 +15,100 @@ Swap into use in server/app.py:
 import numpy as np
 from .base import RadarSource
 
-# Fixed hardware constants — do NOT change without testing on the board
-NUM_CHIRPS   = 32
-NUM_SAMPLES  = 64
-RADAR_FPS    = 10         # matches Radar Fusion GUI default; safe for our frame size
-                          # (64 samples × 32 chirps × 3 antennas = 6144 bytes < 16k FIFO limit)
+# Physical axis constants (BGT60TR13C defaults)
+_C          = 3e8
+_BW         = 1.5e9                     # default sweep bandwidth  ~1.5 GHz
+_FC         = 60.75e9
+_LAMBDA     = _C / _FC
+_CHIRP_DT   = 0.5e-3                    # chirp repetition time
 
-# Physical axis constants (matches old/app.py)
-_C           = 3e8
-_BW          = 1.5e9                                   # 61.5 GHz - 60 GHz
-_FC          = 60.75e9
-_LAMBDA      = _C / _FC
-_CHIRP_DT    = 0.5e-3                                  # chirp repetition time
+RANGE_RES_M  = _C / (2 * _BW)          # ~0.10 m per range bin
 
-RANGE_RES_M  = _C / (2 * _BW)                         # ~0.10 m per bin
-V_MAX_MS     = _LAMBDA / (4 * _CHIRP_DT)              # ~2.47 m/s
-V_MAX_KMH    = V_MAX_MS * 3.6                          # ~8.89 km/h
-MAX_RANGE_CM = (NUM_SAMPLES // 2) * RANGE_RES_M * 100 # 320 cm
+# Default device frame dimensions (no custom config)
+NUM_RX      = 3
+NUM_CHIRPS  = 64                        # 64 chirps  per frame (board default)
+NUM_SAMPLES = 64                        # 64 samples per chirp (board default)
+NUM_RANGE   = NUM_SAMPLES // 2          # 32 one-sided range bins
+
+V_MAX_MS    = _LAMBDA / (4 * _CHIRP_DT)           # ~2.47 m/s
+V_MAX_KMH   = V_MAX_MS * 3.6                      # ~8.89 km/h
+MAX_RANGE_CM = NUM_RANGE * RANGE_RES_M * 100      # 320 cm
 
 # Extent for imshow: [v_min_kmh, v_max_kmh, range_min_cm, range_max_cm]
-RD_EXTENT    = [-V_MAX_KMH, V_MAX_KMH, 0, MAX_RANGE_CM]
+RD_EXTENT   = [-V_MAX_KMH, V_MAX_KMH, 0, MAX_RANGE_CM]
+
+EMA_ALPHA   = 0.85   # background EMA — rejects static clutter (walls, desk)
 
 
 class InfineonRadar(RadarSource):
     """
     Live data from the BGT60TR13C eval board.
-    get_frame() is blocking — always called from inside the radar reader thread.
-    Returns a 2D array shaped (range_bins, vel_bins) = (32, 32) in dBFS-ready linear.
+
+    Uses board default config (no FmcwSimpleSequenceConfig).
+    Returns a 2D range-doppler magnitude map shaped (64, 32):
+      axis 0 = Doppler / velocity  (row 32 = zero velocity after fftshift)
+      axis 1 = range bins          (bin 0 = closest, bin 31 = ~3.2 m)
     """
 
     def __init__(self):
         self._device     = None
-        self._background = None   # EMA of raw ADC data for MTI clutter rejection
+        self._background = None   # per-antenna EMA: shape (num_rx, num_chirps, num_samples)
 
     def open(self) -> None:
         from ifxradarsdk.fmcw import DeviceFmcw
-        from ifxradarsdk.fmcw.types import FmcwSimpleSequenceConfig, FmcwSequenceChirp
 
-        self._device = DeviceFmcw()
+        self._device = DeviceFmcw()   # use board defaults — no custom config
 
-        config = FmcwSimpleSequenceConfig(
-            frame_repetition_time_s = 1.0 / RADAR_FPS,   # 0.2 s — safe for USB
-            chirp_repetition_time_s = _CHIRP_DT,
-            num_chirps              = NUM_CHIRPS,
-            tdm_mimo                = False,
-            chirp=FmcwSequenceChirp(
-                start_frequency_Hz = 60e9,
-                end_frequency_Hz   = 61.5e9,
-                sample_rate_Hz     = 1_000_000,
-                num_samples        = NUM_SAMPLES,
-                rx_mask            = 7,    # all 3 RX antennas
-                tx_mask            = 1,
-                tx_power_level     = 31,
-                lp_cutoff_Hz       = 500_000,
-                hp_cutoff_Hz       = 80_000,
-                if_gain_dB         = 33,
-            ),
-        )
-        sequence = self._device.create_simple_sequence(config)
-        self._device.set_acquisition_sequence(sequence)
+        # Drain stale frames from hardware FIFO (same as detect_hand.py drain_buffer)
+        for _ in range(10):
+            try:
+                self._device.get_next_frame()
+            except Exception:
+                pass
+
+        self._background = None   # reset background on each open
 
     def get_frame(self) -> np.ndarray:
         """
         Read one frame and return a Range-Doppler magnitude map.
-        Output shape: (num_chirps, range_bins) = (32, 32)
-          axis 0 = Doppler / velocity   (row 16 = zero velocity after fftshift)
-          axis 1 = range bins           (bin 0 = closest, bin 31 = ~3.2 m)
+        Output shape: (num_chirps, num_range) = (64, 32)
 
-        Pipeline improvements vs. old/app.py:
-          1. Average all 3 RX antennas  → +4.8 dB SNR vs. single antenna
-          2. MTI clutter filter          → exponential moving average subtracted
-             from the raw ADC data to reject static reflections (desk, walls)
-             that would otherwise swamp the hand signal at 30 cm
-          3. Hanning windows on both axes
-          4. Range FFT (one-sided) + Doppler FFT (fftshift)
+        Pipeline:
+          1. Per-antenna EMA background subtraction (MTI clutter filter)
+          2. Hanning windows on both range and Doppler axes
+          3. Range FFT — one-sided (axis 1)
+          4. Doppler FFT — fftshift puts zero-velocity at row num_chirps//2 = 32
+          5. Average magnitude across all 3 RX antennas  (+4.8 dB SNR)
         """
         raw     = self._device.get_next_frame()   # blocks until board is ready
         rx_data = raw[0].astype(float)             # (num_rx, num_chirps, num_samples)
 
-        # ── Step 1: average all RX antennas for +4.8 dB SNR ────────────────
-        rx_avg = np.mean(rx_data, axis=0)          # (32, 64)
+        num_rx, num_chirps, num_samples = rx_data.shape
 
-        # ── Step 2: MTI clutter filter ──────────────────────────────────────
-        # The EMA tracks the slow-changing static environment.
-        # Subtracting it highlights fast-changing targets (moving hand).
-        # alpha=0.85 at 5 fps → time constant ≈ 1.3 s (adapts to slow drift,
-        # ignores hand movement which changes every frame).
+        # ── Step 1: per-antenna MTI clutter filter ───────────────────────────
+        # First frame seeds the background — return zeros so the caller skips it.
         if self._background is None:
-            self._background = rx_avg.copy()
-            return np.zeros((NUM_CHIRPS, NUM_SAMPLES // 2))  # skip first frame
+            self._background = rx_data.copy()
+            return np.zeros((num_chirps, num_samples // 2))
 
-        mti = rx_avg - self._background
-        self._background = 0.85 * self._background + 0.15 * rx_avg
+        mti = rx_data - self._background
+        self._background = EMA_ALPHA * self._background + (1 - EMA_ALPHA) * rx_data
 
-        # ── Step 3: Hanning windows ─────────────────────────────────────────
-        win_range   = np.hanning(mti.shape[1])    # (64,)
-        win_doppler = np.hanning(mti.shape[0])    # (32,)
-        windowed    = mti * win_range[np.newaxis, :] * win_doppler[:, np.newaxis]
+        # ── Step 2: Hanning windows ──────────────────────────────────────────
+        win_range   = np.hanning(num_samples)   # (num_samples,)
+        win_doppler = np.hanning(num_chirps)    # (num_chirps,)
 
-        # ── Step 4: Range FFT → one-sided ───────────────────────────────────
-        range_fft = np.fft.fft(windowed, axis=1)[:, : mti.shape[1] // 2]
+        # ── Steps 3–4: FFT per antenna ───────────────────────────────────────
+        maps = []
+        for rx in range(num_rx):
+            chirp_data = mti[rx]   # (num_chirps, num_samples)
+            windowed   = chirp_data * win_range[np.newaxis, :] * win_doppler[:, np.newaxis]
+            range_fft  = np.fft.fft(windowed, axis=1)[:, :num_samples // 2]
+            rd         = np.fft.fftshift(np.fft.fft(range_fft, axis=0), axes=0)
+            maps.append(np.abs(rd))
 
-        # ── Step 5: Doppler FFT — fftshift puts zero-velocity at row 16 ─────
-        rd_map = np.fft.fftshift(np.fft.fft(range_fft, axis=0), axes=0)
-
-        return np.abs(rd_map)   # (num_chirps=32, range_bins=32)  NO transpose
+        # ── Step 5: average across antennas ─────────────────────────────────
+        return np.mean(maps, axis=0)   # (num_chirps, num_samples//2) = (64, 32)
 
     def close(self) -> None:
         if self._device is not None:
