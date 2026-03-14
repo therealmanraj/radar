@@ -1,300 +1,289 @@
 /**
  * app.js
  * ------
- * Device detection → connect flow → WebSocket stream + Range-Doppler heatmap.
+ * Dual-sensor radar dashboard.
  *
- * LED states
- * ----------
- *   idle      — no device detected (amber, slow pulse)
- *   detected  — device found, not connected (dim white, slow pulse)
- *   connected — streaming (solid white, static)
- *   error     — connection failed (red, fast blink)
+ * SensorPanel manages all state for one BGT60TR13C board:
+ *   LED state machine, WebSocket stream, stats display, range-doppler heatmap.
+ *
+ * Two SensorPanel instances (id=0, id=1) are created at boot.
+ * A single pollDevices() loop keeps both panels' detected/idle state current.
  */
 
 import { PlotlyRenderer } from './renderers/plotly_renderer.js';
 
-// ── DOM refs ────────────────────────────────────────────────────────────────
-const ledEl      = document.getElementById('led');
-const labelEl    = document.getElementById('led-label');
-const nameEl     = document.getElementById('device-name');
-const descEl     = document.getElementById('device-desc');
-const actionBtn  = document.getElementById('action-btn');
-const logEl      = document.getElementById('log-msg');
-const cardEl     = document.querySelector('.device-card');
-const dataPanelEl   = document.getElementById('data-panel');
-const dPeak         = document.getElementById('d-peak');
-const dRange        = document.getElementById('d-range');
-const dVel          = document.getElementById('d-vel');
-const dBar          = document.getElementById('d-bar');
-const dFps          = document.getElementById('d-fps');
-const dActivity     = document.getElementById('d-activity');
-const dActivityText = document.getElementById('d-activity-text');
-
 // Physics constants — must match radar/sdk.py
-const RANGE_CM_PER_BIN = 10;          // 0.1 m/bin × 100
-const V_MAX_KMH        = 8.89;        // ±8.89 km/h across 64 doppler bins
-const DOPPLER_CENTRE   = 32;          // bin 32 = zero velocity (fftshift on 64 chirps)
-const ACTIVITY_THRESH_DB = 6;         // dB above baseline in motion bins → activity
+const RANGE_CM_PER_BIN   = 10;   // 0.1 m/bin × 100
+const V_MAX_KMH          = 8.89; // ±8.89 km/h across 64 doppler bins
+const DOPPLER_CENTRE      = 32;   // bin 32 = zero velocity (fftshift on 64 chirps)
+const ACTIVITY_THRESH_DB  = 6;    // dB above baseline → activity
 
-// Rolling session stats for the signal bar and baseline
-let sessionPeakMax = -Infinity;
-let sessionPeakMin =  Infinity;
-let baselinePeak   = null;            // set from first N frames
-let baselineFrames = 0;
-let baselineSum    = 0;
-let lastFrameTime  = performance.now();
-let fpsFrames      = 0;
-
-// ── State ───────────────────────────────────────────────────────────────────
-let ws            = null;
-let pollTimer     = null;
-let appState      = 'idle';      // 'idle' | 'detected' | 'connected' | 'error'
-let lastDetected  = false;
-let renderer      = null;
-
-// ── Logging ─────────────────────────────────────────────────────────────────
+const logEl = document.getElementById('log-msg');
 function log(msg) {
   logEl.textContent = msg;
   console.log('[radar]', msg);
 }
 
-// ── LED state machine ────────────────────────────────────────────────────────
+// ── LED state metadata ────────────────────────────────────────────────────────
 const STATE_META = {
   idle: {
-    ledClass:   'idle',
-    labelClass: 'idle',
-    labelText:  'No device',
-    btnText:    'Connect',
-    btnClass:   'btn-connect',
-    btnEnabled: false,
+    ledClass: 'idle', labelClass: 'idle', labelText: 'No device',
+    btnText: 'Connect', btnClass: 'btn-connect', btnEnabled: false,
   },
   detected: {
-    ledClass:   'detected',
-    labelClass: 'detected',
-    labelText:  'Device found',
-    btnText:    'Connect',
-    btnClass:   'btn-connect',
-    btnEnabled: true,
+    ledClass: 'detected', labelClass: 'detected', labelText: 'Device found',
+    btnText: 'Connect', btnClass: 'btn-connect', btnEnabled: true,
   },
   connected: {
-    ledClass:   'connected',
-    labelClass: 'connected',
-    labelText:  'Connected',
-    btnText:    'Disconnect',
-    btnClass:   'btn-disconnect',
-    btnEnabled: true,
+    ledClass: 'connected', labelClass: 'connected', labelText: 'Connected',
+    btnText: 'Disconnect', btnClass: 'btn-disconnect', btnEnabled: true,
   },
   error: {
-    ledClass:   'error',
-    labelClass: 'error',
-    labelText:  'Error',
-    btnText:    'Retry',
-    btnClass:   'btn-retry',
-    btnEnabled: true,
+    ledClass: 'error', labelClass: 'error', labelText: 'Error',
+    btnText: 'Retry', btnClass: 'btn-retry', btnEnabled: true,
   },
 };
 
-function setState(newState, desc = null) {
-  appState = newState;
-  const m  = STATE_META[newState];
+// ── SensorPanel class ─────────────────────────────────────────────────────────
+class SensorPanel {
+  constructor(id) {
+    this.id = id;
 
-  // ── LED — force animation restart ───────────────────────────────────────
-  // Browsers reuse the running animation timeline when you swap CSS classes.
-  // Setting animation:none + reading offsetHeight triggers a reflow that
-  // flushes the old animation, so the new class animation starts from frame 0.
-  ledEl.style.animation = 'none';
-  ledEl.className       = 'led ' + m.ledClass;
-  ledEl.offsetHeight;          // force reflow — do NOT remove this line
-  ledEl.style.animation = '';  // hand control back to the CSS class
+    // DOM refs — all suffixed with sensor id
+    this.ledEl         = document.getElementById(`led-${id}`);
+    this.labelEl       = document.getElementById(`led-label-${id}`);
+    this.descEl        = document.getElementById(`device-desc-${id}`);
+    this.actionBtn     = document.getElementById(`action-btn-${id}`);
+    this.cardEl        = document.getElementById(`card-${id}`);
+    this.dataPanelEl   = document.getElementById(`data-panel-${id}`);
+    this.dPeak         = document.getElementById(`d-peak-${id}`);
+    this.dRange        = document.getElementById(`d-range-${id}`);
+    this.dVel          = document.getElementById(`d-vel-${id}`);
+    this.dBar          = document.getElementById(`d-bar-${id}`);
+    this.dFps          = document.getElementById(`d-fps-${id}`);
+    this.dActivity     = document.getElementById(`d-activity-${id}`);
+    this.dActivityText = document.getElementById(`d-activity-text-${id}`);
+    this.plotEl        = document.getElementById(`rd-plot-${id}`);
 
-  // ── Label ────────────────────────────────────────────────────────────────
-  labelEl.className   = 'led-label ' + m.labelClass;
-  labelEl.textContent = m.labelText;
+    // Per-sensor state
+    this.appState    = 'idle';
+    this.lastDetected = false;
+    this.ws          = null;
+    this.renderer    = null;
 
-  // ── Card border ──────────────────────────────────────────────────────────
-  cardEl.className = 'device-card ' + newState;
+    // Baseline / stats (reset each connection)
+    this.baselinePeak   = null;
+    this.baselineFrames = 0;
+    this.baselineSum    = 0;
+    this.sessionPeakMax = -Infinity;
+    this.sessionPeakMin =  Infinity;
+    this.lastFrameTime  = performance.now();
 
-  // ── Data panel ───────────────────────────────────────────────────────────
-  if (newState === 'connected') {
-    dataPanelEl.classList.add('visible');
-    // Reset session stats on each new connection
-    sessionPeakMax = -Infinity;
-    sessionPeakMin =  Infinity;
-    baselinePeak   = null;
-    baselineFrames = 0;
-    baselineSum    = 0;
-  } else {
-    dataPanelEl.classList.remove('visible');
+    this._bindButton();
   }
 
-  // ── Button ───────────────────────────────────────────────────────────────
-  actionBtn.textContent = m.btnText;
-  actionBtn.className   = 'btn ' + m.btnClass;
-  actionBtn.disabled    = !m.btnEnabled;
+  // ── LED state machine ───────────────────────────────────────────────────
+  setState(newState, desc = null) {
+    this.appState = newState;
+    const m = STATE_META[newState];
 
-  // Optional description override
-  if (desc !== null) descEl.textContent = desc;
-}
+    // Force animation restart — prevents browser reusing old timeline
+    this.ledEl.style.animation = 'none';
+    this.ledEl.className       = 'led ' + m.ledClass;
+    this.ledEl.offsetHeight;          // force reflow — do NOT remove
+    this.ledEl.style.animation = '';
 
-// ── Device polling ───────────────────────────────────────────────────────────
-async function pollDevice() {
-  try {
-    const res  = await fetch('/device/status');
-    const data = await res.json();
+    this.labelEl.className   = 'led-label ' + m.labelClass;
+    this.labelEl.textContent = m.labelText;
+    this.cardEl.className    = 'device-card ' + newState;
 
-    // Don't update LED while we're actively connected
-    if (appState === 'connected') return;
-
-    if (data.detected) {
-      lastDetected = true;
-      descEl.textContent = data.description || 'Device ready';
-      if (appState !== 'detected') {
-        setState('detected');
-        log(`Device detected: ${data.description}`);
-      }
+    if (newState === 'connected') {
+      this.dataPanelEl.classList.add('visible');
+      // Reset session stats
+      this.baselinePeak   = null;
+      this.baselineFrames = 0;
+      this.baselineSum    = 0;
+      this.sessionPeakMax = -Infinity;
+      this.sessionPeakMin =  Infinity;
+      this.lastFrameTime  = performance.now();
     } else {
-      lastDetected = false;
-      if (appState !== 'idle') {
-        setState('idle', 'No Infineon radar device found');
-        log('No device found — polling…');
-      }
+      this.dataPanelEl.classList.remove('visible');
     }
-  } catch {
-    log('Could not reach server — retrying…');
+
+    this.actionBtn.textContent = m.btnText;
+    this.actionBtn.className   = 'btn ' + m.btnClass;
+    this.actionBtn.disabled    = !m.btnEnabled;
+
+    if (desc !== null) this.descEl.textContent = desc;
   }
-}
 
-// ── WebSocket stream ─────────────────────────────────────────────────────────
-function openStream() {
-  if (ws) { ws.close(); ws = null; }
+  // ── WebSocket stream ────────────────────────────────────────────────────
+  openStream() {
+    if (this.ws) { this.ws.close(); this.ws = null; }
 
-  const url = `ws://${location.host}/ws`;
-  ws = new WebSocket(url);
+    const url = `ws://${location.host}/ws/${this.id}`;
+    this.ws = new WebSocket(url);
 
-  ws.onopen = () => {
-    setState('connected', descEl.textContent);
-    log('WebSocket connected — receiving frames');
-    // Init heatmap renderer
-    renderer = new PlotlyRenderer();
-    renderer.init(document.getElementById('rd-plot'), {
-      numDoppler: 64, numRange: 32, logScale: true,
-    });
-  };
+    this.ws.onopen = () => {
+      this.setState('connected', this.descEl.textContent);
+      log(`Sensor ${this.id === 0 ? 'A' : 'B'}: WebSocket connected`);
+      // Init heatmap
+      this.renderer = new PlotlyRenderer();
+      this.renderer.init(this.plotEl, { numDoppler: 64, numRange: 32, logScale: true });
+    };
 
-  ws.onclose = () => {
-    if (appState === 'connected') {
-      // Unexpected close
-      setState('error', 'Stream closed unexpectedly');
-      log('WebSocket closed — click Retry to reconnect');
-    }
-  };
+    this.ws.onclose = () => {
+      if (this.appState === 'connected') {
+        this.setState('error', 'Stream closed unexpectedly');
+        log(`Sensor ${this.id === 0 ? 'A' : 'B'}: stream closed — click Retry`);
+      }
+    };
 
-  ws.onerror = () => {
-    setState('error', 'WebSocket error');
-    log('WebSocket error');
-  };
+    this.ws.onerror = () => {
+      this.setState('error', 'WebSocket error');
+      log(`Sensor ${this.id === 0 ? 'A' : 'B'}: WebSocket error`);
+    };
 
-  ws.onmessage = (event) => {
-    const { z, meta } = JSON.parse(event.data);
+    this.ws.onmessage = (event) => {
+      const { z, meta } = JSON.parse(event.data);
+      this._onFrame(z, meta);
+    };
+  }
 
-    // ── Establish baseline from first 10 frames (empty scene) ──────────
-    // Use motion_peak for baseline — it's the clutter-rejected value
-    if (baselineFrames < 10) {
-      baselineSum += meta.motion_peak;
-      baselineFrames++;
-      if (baselineFrames === 10) baselinePeak = baselineSum / 10;
+  closeStream() {
+    if (this.ws) { this.ws.close(); this.ws = null; }
+    if (this.renderer) { this.renderer.destroy(); this.renderer = null; }
+  }
+
+  // ── Frame handler ───────────────────────────────────────────────────────
+  _onFrame(z, meta) {
+    // Establish baseline from first 10 frames (empty scene)
+    if (this.baselineFrames < 10) {
+      this.baselineSum += meta.motion_peak;
+      this.baselineFrames++;
+      if (this.baselineFrames === 10) this.baselinePeak = this.baselineSum / 10;
+      if (this.renderer && z) this.renderer.update(z);
       return;
     }
 
-    // ── Convert bins → physical units (motion-peak bins) ────────────────
+    // Physical units
     const rangeCm = (meta.motion_range_bin * RANGE_CM_PER_BIN).toFixed(0);
     const velBin  = meta.motion_doppler_bin - DOPPLER_CENTRE;
     const velKmh  = (velBin / DOPPLER_CENTRE * V_MAX_KMH).toFixed(1);
     const velSign = velBin > 0 ? '+' : '';
 
-    // ── Signal bar — normalised to session motion_peak min/max ───────────
-    sessionPeakMax = Math.max(sessionPeakMax, meta.motion_peak);
-    sessionPeakMin = Math.min(sessionPeakMin, meta.motion_peak);
-    const range = sessionPeakMax - sessionPeakMin || 1;
-    const pct   = ((meta.motion_peak - sessionPeakMin) / range * 100).toFixed(1);
+    // Signal bar
+    this.sessionPeakMax = Math.max(this.sessionPeakMax, meta.motion_peak);
+    this.sessionPeakMin = Math.min(this.sessionPeakMin, meta.motion_peak);
+    const range = this.sessionPeakMax - this.sessionPeakMin || 1;
+    const pct   = ((meta.motion_peak - this.sessionPeakMin) / range * 100).toFixed(1);
 
-    // ── Activity detection — motion_peak vs. quiet baseline ──────────────
-    const isActive = meta.motion_peak > baselinePeak + ACTIVITY_THRESH_DB;
+    // Activity
+    const isActive = meta.motion_peak > this.baselinePeak + ACTIVITY_THRESH_DB;
 
-    // ── FPS ──────────────────────────────────────────────────────────────
-    fpsFrames++;
+    // FPS
     const now = performance.now();
-    const fps = Math.round(1000 / (now - lastFrameTime));
-    lastFrameTime = now;
+    const fps = Math.round(1000 / (now - this.lastFrameTime));
+    this.lastFrameTime = now;
 
-    // ── Update DOM ───────────────────────────────────────────────────────
-    dPeak.textContent = meta.motion_peak.toFixed(1);
-    dRange.textContent = rangeCm;
-    dVel.textContent  = velSign + velKmh;
-    dBar.style.width  = pct + '%';
-    dFps.textContent  = fps + ' fps';
+    // DOM
+    this.dPeak.textContent  = meta.motion_peak.toFixed(1);
+    this.dRange.textContent = rangeCm;
+    this.dVel.textContent   = velSign + velKmh;
+    this.dBar.style.width   = pct + '%';
+    this.dFps.textContent   = fps + ' fps';
 
     if (isActive) {
-      dActivity.className       = 'activity-badge active';
-      dActivityText.textContent = `Motion detected — ${rangeCm} cm away`;
+      this.dActivity.className       = 'activity-badge active';
+      this.dActivityText.textContent = `Motion detected — ${rangeCm} cm away`;
     } else {
-      dActivity.className       = 'activity-badge';
-      dActivityText.textContent = 'No activity — wave your hand over the sensor';
+      this.dActivity.className       = 'activity-badge';
+      this.dActivityText.textContent = 'No activity — wave your hand over the sensor';
     }
 
-    // ── Update range-doppler heatmap ─────────────────────────────────────
-    if (renderer && z) renderer.update(z);
-  };
-}
-
-function closeStream() {
-  if (ws) { ws.close(); ws = null; }
-  if (renderer) { renderer.destroy(); renderer = null; }
-}
-
-// ── Button handler ───────────────────────────────────────────────────────────
-actionBtn.addEventListener('click', async () => {
-  if (appState === 'detected' || appState === 'idle') {
-    // ── Connect ──
-    actionBtn.disabled = true;
-    log('Sending connect request…');
-    try {
-      const res  = await fetch('/device/connect', { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) {
-        openStream();
-      } else {
-        setState('error', data.error || 'Connect failed');
-        log(`Connect failed: ${data.error}`);
-      }
-    } catch (e) {
-      setState('error', 'Server unreachable');
-      log('Connect request failed');
-    }
-
-  } else if (appState === 'connected') {
-    // ── Disconnect ──
-    log('Disconnecting…');
-    closeStream();
-    try {
-      await fetch('/device/disconnect', { method: 'POST' });
-    } catch { /* best effort */ }
-    setState('detected', descEl.textContent);
-    log('Disconnected');
-
-  } else if (appState === 'error') {
-    // ── Retry ──
-    setState(lastDetected ? 'detected' : 'idle');
-    log('Retrying…');
+    // Heatmap
+    if (this.renderer && z) this.renderer.update(z);
   }
-});
 
-// ── Boot ─────────────────────────────────────────────────────────────────────
+  // ── Button click handler ────────────────────────────────────────────────
+  _bindButton() {
+    this.actionBtn.addEventListener('click', async () => {
+      const label = this.id === 0 ? 'A' : 'B';
+
+      if (this.appState === 'detected' || this.appState === 'idle') {
+        // Connect
+        this.actionBtn.disabled = true;
+        log(`Sensor ${label}: connecting…`);
+        try {
+          const res  = await fetch(`/device/connect/${this.id}`, { method: 'POST' });
+          const data = await res.json();
+          if (data.ok) {
+            this.openStream();
+          } else {
+            this.setState('error', data.error || 'Connect failed');
+            log(`Sensor ${label}: connect failed — ${data.error}`);
+          }
+        } catch {
+          this.setState('error', 'Server unreachable');
+          log(`Sensor ${label}: connect request failed`);
+        }
+
+      } else if (this.appState === 'connected') {
+        // Disconnect
+        log(`Sensor ${label}: disconnecting…`);
+        this.closeStream();
+        try {
+          await fetch(`/device/disconnect/${this.id}`, { method: 'POST' });
+        } catch { /* best effort */ }
+        this.setState(this.lastDetected ? 'detected' : 'idle', this.descEl.textContent);
+        log(`Sensor ${label}: disconnected`);
+
+      } else if (this.appState === 'error') {
+        // Retry
+        this.setState(this.lastDetected ? 'detected' : 'idle');
+      }
+    });
+  }
+}
+
+// ── Instantiate both panels ───────────────────────────────────────────────────
+const panels = [new SensorPanel(0), new SensorPanel(1)];
+
+// ── Device polling  (single poll updates both panels) ────────────────────────
+async function pollDevices() {
+  try {
+    const res  = await fetch('/device/status');
+    const data = await res.json();
+
+    data.sensors.forEach((dev, i) => {
+      const panel = panels[i];
+      if (panel.appState === 'connected') return;   // don't disturb active stream
+
+      if (dev.detected) {
+        panel.lastDetected       = true;
+        panel.descEl.textContent = dev.description || 'Device ready';
+        if (panel.appState !== 'detected') {
+          panel.setState('detected');
+          log(`Sensor ${i === 0 ? 'A' : 'B'}: device detected`);
+        }
+      } else {
+        panel.lastDetected = false;
+        if (panel.appState !== 'idle') {
+          panel.setState('idle', 'No Infineon radar device found');
+          log(`Sensor ${i === 0 ? 'A' : 'B'}: no device — polling…`);
+        }
+      }
+    });
+  } catch {
+    log('Could not reach server — retrying…');
+  }
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
 async function boot() {
   log('Starting — scanning for devices…');
-  await pollDevice();
-  // Poll every 3 seconds to detect plug/unplug
-  pollTimer = setInterval(pollDevice, 3000);
+  await pollDevices();
+  setInterval(pollDevices, 3000);
 }
 
 boot();

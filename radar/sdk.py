@@ -48,16 +48,21 @@ class InfineonRadar(RadarSource):
     Returns a 2D range-doppler magnitude map shaped (64, 32):
       axis 0 = Doppler / velocity  (row 32 = zero velocity after fftshift)
       axis 1 = range bins          (bin 0 = closest, bin 31 = ~3.2 m)
+
+    Pass uuid= to open a specific board when multiple are connected.
+    Leave uuid=None to open the first available board.
     """
 
-    def __init__(self):
+    def __init__(self, uuid: str | None = None):
+        self._uuid       = uuid
         self._device     = None
         self._background = None   # per-antenna EMA: shape (num_rx, num_chirps, num_samples)
 
     def open(self) -> None:
         from ifxradarsdk.fmcw import DeviceFmcw
 
-        self._device = DeviceFmcw()   # use board defaults — no custom config
+        # Open a specific board by UUID, or the first available board
+        self._device = DeviceFmcw(uuid=self._uuid) if self._uuid is not None else DeviceFmcw()
 
         # Drain stale frames from hardware FIFO (same as detect_hand.py drain_buffer)
         for _ in range(10):
