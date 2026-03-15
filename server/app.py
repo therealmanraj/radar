@@ -247,11 +247,15 @@ async def get_config() -> dict:
 async def device_status() -> dict:
     global _device_cache
     devices = await asyncio.get_event_loop().run_in_executor(None, _detect_all)
-    # Only update the cache when a device is positively detected.
-    # Never overwrite a previously-seen UUID just because get_list() returns
-    # fewer results — an already-open DeviceFmcw hides itself from get_list(),
-    # which would incorrectly mark the other sensor slot as "not detected".
+    # Update cache per slot:
+    # - Skip slots that are actively streaming: their DeviceFmcw is already open
+    #   so get_list() hides it, shifting every subsequent UUID one index earlier.
+    #   Trusting the shifted list would corrupt the UUID stored for that slot.
+    # - For idle slots: update only when positively detected; keep a previously
+    #   seen UUID rather than clearing it on a scan that found fewer devices.
     for i in range(NUM_SENSORS):
+        if _threads[i] is not None and _threads[i].is_alive():
+            continue  # slot is live — don't touch its cached UUID
         if devices[i]["detected"]:
             _device_cache[i] = devices[i]
         elif not _device_cache[i]["detected"]:
