@@ -58,6 +58,14 @@ _threads: list[threading.Thread | None] = [None] * NUM_SENSORS
 _stops:   list[threading.Event]         = [threading.Event() for _ in range(NUM_SENSORS)]
 _event_loop: asyncio.AbstractEventLoop | None = None
 
+# Cache last-seen device info so connect doesn't re-scan (already-open devices
+# disappear from get_list(), which would make sensor 1 un-connectable after
+# sensor 0 is already open).
+_device_cache: list[dict] = [
+    {"detected": False, "uuid": None, "description": "No BGT60TR13C found"}
+    for _ in range(NUM_SENSORS)
+]
+
 
 # ---------------------------------------------------------------------------
 # Device detection
@@ -237,11 +245,21 @@ async def get_config() -> dict:
 
 @app.get("/device/status")
 async def device_status() -> dict:
+    global _device_cache
     devices = await asyncio.get_event_loop().run_in_executor(None, _detect_all)
+    # Only update the cache when a device is positively detected.
+    # Never overwrite a previously-seen UUID just because get_list() returns
+    # fewer results — an already-open DeviceFmcw hides itself from get_list(),
+    # which would incorrectly mark the other sensor slot as "not detected".
+    for i in range(NUM_SENSORS):
+        if devices[i]["detected"]:
+            _device_cache[i] = devices[i]
+        elif not _device_cache[i]["detected"]:
+            _device_cache[i] = devices[i]   # still not detected — update normally
     return {
         "sensors": [
             {
-                **devices[i],
+                **_device_cache[i],
                 "connected": _threads[i] is not None and _threads[i].is_alive(),
                 "clients":   managers[i].count,
             }
@@ -257,11 +275,10 @@ async def device_connect(sensor_id: int) -> dict:
     if _threads[sensor_id] and _threads[sensor_id].is_alive():
         return {"ok": False, "error": "Already running"}
 
-    devices = await asyncio.get_event_loop().run_in_executor(None, _detect_all)
-    if not devices[sensor_id]["detected"]:
+    if not _device_cache[sensor_id]["detected"]:
         return {"ok": False, "error": f"No device detected for sensor {sensor_id}"}
 
-    source = _build_source(devices[sensor_id]["uuid"])
+    source = _build_source(_device_cache[sensor_id]["uuid"])
     _stops[sensor_id] = threading.Event()
     _threads[sensor_id] = threading.Thread(
         target=_radar_reader,
