@@ -3,10 +3,8 @@ uvicorn[standard]>=0.29
 websockets>=12.0
 numpy>=1.24
 pyserial>=3.5
-
-# Infineon Radar SDK — install separately:
-#   pip install ifxradarsdk
-# ifxradarsdk
+# ifxradarsdk — not on PyPI, install from Infineon wheel:
+#   pip install ifxradarsdk-3.6.4+4b4a6245-py3-none-win_amd64.whl
 
 # Legacy Streamlit UI (no longer used):
 # streamlit>=1.32
