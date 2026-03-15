@@ -8,17 +8,13 @@ Endpoints
 GET  /device/status                — detect both boards, report running state
 POST /device/connect/{sensor_id}   — start reader thread for sensor 0 or 1
 POST /device/disconnect/{sensor_id}— stop reader thread for sensor 0 or 1
-
 WS   /ws/{sensor_id}              — frame stream for sensor 0 or 1
 GET  /config                       — current server config
 
-Each sensor has an independent:
-  - ConnectionManager  (WebSocket clients)
-  - asyncio.Queue      (maxsize=1, drops stale frames)
-  - radar reader thread
-  - stop event
-
-To swap data source:  change _build_source() — one place, nothing else changes.
+Detection strategy (same proven logic as single-sensor, extended for N boards):
+  1. SDK DeviceFmcw.get_list() — most reliable for USB bulk-transfer devices
+  2. pyserial list_ports fallback — boards enumerated as CDC serial
+  3. Simulation fallback — when CONFIG["source"] == "simulation"
 """
 
 from __future__ import annotations
@@ -46,73 +42,81 @@ logger = logging.getLogger(__name__)
 NUM_SENSORS = 2
 
 CONFIG: dict = {
-    "source":      "sdk",          # "simulation" | "sdk"
-    "num_range":   32,             # NUM_SAMPLES // 2 = 32 range bins
-    "num_doppler": 64,             # NUM_CHIRPS = 64 with board default config
+    "source":      "sdk",   # "simulation" | "sdk"
+    "num_range":   32,      # NUM_SAMPLES // 2
+    "num_doppler": 64,      # NUM_CHIRPS (board default)
     "fps":         20,
     "log_scale":   True,
 }
 
 # ---------------------------------------------------------------------------
-# Per-sensor mutable state  (only touched from event loop via thread-safe APIs)
+# Per-sensor mutable state
 # ---------------------------------------------------------------------------
-managers: list[ConnectionManager]          = [ConnectionManager() for _ in range(NUM_SENSORS)]
-_queues:  list[asyncio.Queue | None]       = [None] * NUM_SENSORS
-_threads: list[threading.Thread | None]    = [None] * NUM_SENSORS
-_stops:   list[threading.Event]            = [threading.Event() for _ in range(NUM_SENSORS)]
+managers: list[ConnectionManager]       = [ConnectionManager() for _ in range(NUM_SENSORS)]
+_queues:  list[asyncio.Queue | None]    = [None] * NUM_SENSORS
+_threads: list[threading.Thread | None] = [None] * NUM_SENSORS
+_stops:   list[threading.Event]         = [threading.Event() for _ in range(NUM_SENSORS)]
 _event_loop: asyncio.AbstractEventLoop | None = None
 
+# Cache last-seen device info so connect doesn't re-scan (already-open devices
+# disappear from get_list(), which would make sensor 1 un-connectable after
+# sensor 0 is already open).
+_device_cache: list[dict] = [
+    {"detected": False, "uuid": None, "description": "No BGT60TR13C found"}
+    for _ in range(NUM_SENSORS)
+]
+
 
 # ---------------------------------------------------------------------------
-# Device detection  (blocking — run in executor so it never stalls the loop)
+# Device detection
 # ---------------------------------------------------------------------------
 def _detect_all() -> list[dict]:
     """
-    Return a list of NUM_SENSORS device dicts, one per slot.
-    Uses SDK enumeration first (most reliable for USB bulk-transfer devices).
-    VID: 058B  PID: 0251  keyword: IFX
+    Return a list of exactly NUM_SENSORS dicts, one per sensor slot.
+    Uses the same proven detection logic as the original single-sensor code,
+    extended to enumerate multiple boards.
     """
     result: list[dict] = [
         {"detected": False, "uuid": None, "description": "No BGT60TR13C found"}
         for _ in range(NUM_SENSORS)
     ]
 
-    # 1. SDK enumeration — returns list of UUID strings
+    # 1. SDK enumeration — most reliable for USB bulk-transfer devices
     try:
         from ifxradarsdk.fmcw import DeviceFmcw
         uuids = DeviceFmcw.get_list()
-        logger.info("SDK found %d device(s): %s", len(uuids), uuids)
+        logger.info("SDK found %d device(s)", len(uuids))
         for i, uid in enumerate(uuids[:NUM_SENSORS]):
             result[i] = {
                 "detected":    True,
                 "uuid":        uid,
                 "description": f"BGT60TR13C  (…{uid[-8:]})",
             }
+        if uuids:
+            return result   # SDK found at least one — trust it completely
     except Exception as exc:
         logger.warning("SDK device scan failed: %s", exc)
 
-    # 2. Pyserial fallback — catches boards visible as CDC serial ports
-    #    Gives detected=True without a UUID; connect will open first available board.
-    if not any(r["detected"] for r in result):
-        try:
-            from serial.tools import list_ports
-            ifx_ports = [
-                p for p in list_ports.comports()
-                if ("058B" in (p.hwid or "") and "0251" in (p.hwid or ""))
-                or "IFX" in (p.description or "").upper()
-                or "BGT60" in (p.description or "").upper()
-            ]
-            logger.info("Pyserial fallback found %d port(s)", len(ifx_ports))
-            for i, port in enumerate(ifx_ports[:NUM_SENSORS]):
-                result[i] = {
-                    "detected":    True,
-                    "uuid":        None,   # will open first available board
-                    "description": f"BGT60TR13C  ({port.device})",
-                }
-        except Exception as exc:
-            logger.warning("Pyserial fallback failed: %s", exc)
+    # 2. pyserial fallback — boards that enumerate as CDC serial on some drivers
+    try:
+        from serial.tools import list_ports
+        ifx_ports = [
+            p for p in list_ports.comports()
+            if ("058B" in (p.hwid or "") and "0251" in (p.hwid or ""))
+            or "IFX"   in (p.description or "").upper()
+            or "BGT60" in (p.description or "").upper()
+        ]
+        logger.info("pyserial fallback found %d port(s)", len(ifx_ports))
+        for i, port in enumerate(ifx_ports[:NUM_SENSORS]):
+            result[i] = {
+                "detected":    True,
+                "uuid":        None,   # open first-available board on connect
+                "description": f"BGT60TR13C  ({port.device})",
+            }
+    except Exception as exc:
+        logger.warning("pyserial fallback failed: %s", exc)
 
-    # 4. Simulation fallback — mark all slots as "detected"
+    # 3. Simulation fallback
     if CONFIG["source"] == "simulation":
         for i in range(NUM_SENSORS):
             if not result[i]["detected"]:
@@ -126,7 +130,7 @@ def _detect_all() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Radar source factory
+# Source factory
 # ---------------------------------------------------------------------------
 def _build_source(uuid: str | None):
     if CONFIG["source"] == "simulation" or (uuid and uuid.startswith("SIM")):
@@ -138,7 +142,6 @@ def _build_source(uuid: str | None):
 # Thread-safe frame delivery
 # ---------------------------------------------------------------------------
 def _enqueue_latest(queue: asyncio.Queue, payload: dict) -> None:
-    """Drop stale frame if queue is full, keep only the newest."""
     if queue.full():
         try:
             queue.get_nowait()
@@ -172,10 +175,7 @@ def _radar_reader(
             raw     = source.get_frame()
             display = 20.0 * np.log10(np.clip(raw, 1e-6, None)) if log_scale else raw
 
-            # ── Global peak (includes static clutter) ────────────────────────
-            peak_idx = np.unravel_index(display.argmax(), display.shape)
-
-            # ── Motion peak — mask ±4 doppler bins around zero-velocity ──────
+            peak_idx     = np.unravel_index(display.argmax(), display.shape)
             zero_vel_row = display.shape[0] // 2
             motion_mask  = display.copy()
             motion_mask[zero_vel_row - 4 : zero_vel_row + 5, :] = display.min()
@@ -209,7 +209,7 @@ def _radar_reader(
 
 
 # ---------------------------------------------------------------------------
-# Async broadcast loop  (one per sensor, runs for lifetime of server)
+# Async broadcast loop — one per sensor
 # ---------------------------------------------------------------------------
 async def _broadcast_loop(manager: ConnectionManager, queue: asyncio.Queue) -> None:
     while True:
@@ -230,7 +230,6 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_broadcast_loop(managers[i], _queues[i]))
     logger.info("Server ready — open http://localhost:8000")
     yield
-    # Daemon threads die with the process
 
 
 # ---------------------------------------------------------------------------
@@ -246,11 +245,25 @@ async def get_config() -> dict:
 
 @app.get("/device/status")
 async def device_status() -> dict:
+    global _device_cache
     devices = await asyncio.get_event_loop().run_in_executor(None, _detect_all)
+    # Update cache per slot:
+    # - Skip slots that are actively streaming: their DeviceFmcw is already open
+    #   so get_list() hides it, shifting every subsequent UUID one index earlier.
+    #   Trusting the shifted list would corrupt the UUID stored for that slot.
+    # - For idle slots: update only when positively detected; keep a previously
+    #   seen UUID rather than clearing it on a scan that found fewer devices.
+    for i in range(NUM_SENSORS):
+        if _threads[i] is not None and _threads[i].is_alive():
+            continue  # slot is live — don't touch its cached UUID
+        if devices[i]["detected"]:
+            _device_cache[i] = devices[i]
+        elif not _device_cache[i]["detected"]:
+            _device_cache[i] = devices[i]   # still not detected — update normally
     return {
         "sensors": [
             {
-                **devices[i],
+                **_device_cache[i],
                 "connected": _threads[i] is not None and _threads[i].is_alive(),
                 "clients":   managers[i].count,
             }
@@ -266,20 +279,15 @@ async def device_connect(sensor_id: int) -> dict:
     if _threads[sensor_id] and _threads[sensor_id].is_alive():
         return {"ok": False, "error": "Already running"}
 
-    devices = await asyncio.get_event_loop().run_in_executor(None, _detect_all)
-    if not devices[sensor_id]["detected"]:
-        return {"ok": False, "error": f"No device found for sensor {sensor_id}"}
+    if not _device_cache[sensor_id]["detected"]:
+        return {"ok": False, "error": f"No device detected for sensor {sensor_id}"}
 
-    uuid   = devices[sensor_id]["uuid"]
-    source = _build_source(uuid)
-
+    source = _build_source(_device_cache[sensor_id]["uuid"])
     _stops[sensor_id] = threading.Event()
     _threads[sensor_id] = threading.Thread(
         target=_radar_reader,
-        args=(
-            source, CONFIG["fps"], _queues[sensor_id],
-            _event_loop, _stops[sensor_id], CONFIG["log_scale"],
-        ),
+        args=(source, CONFIG["fps"], _queues[sensor_id],
+              _event_loop, _stops[sensor_id], CONFIG["log_scale"]),
         daemon=True,
         name=f"radar-reader-{sensor_id}",
     )

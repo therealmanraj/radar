@@ -1,8 +1,0 @@
-pyserial>=3.5
-numpy>=1.24
-streamlit>=1.32
-matplotlib>=3.7
-# Infineon SDK - install separately if not via pip:
-# pip install ifxradarsdk
-# or download from: https://www.infineon.com/cms/en/product/sensor/radar-sensors/radar-sensor-ics/60ghz-radar/
-# ifxradarsdk

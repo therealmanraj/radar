@@ -1,479 +1,258 @@
 <!DOCTYPE html>
-<html lang="en">
+<html class="h-full" lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BGT60TR13C Radar Dashboard</title>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>Langara College — Radar Dashboard</title>
+
+  <link href="https://fonts.googleapis.com" rel="preconnect"/>
+  <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { DEFAULT: '#e05520', dim: '#a33c15', glow: 'rgba(224,85,32,0.2)' }
+          },
+          fontFamily: { sans: ['Inter', 'sans-serif'] }
+        }
+      }
+    }
+  </script>
 
   <style>
-    /* ------------------------------------------------------------------ */
-    /* Base                                                                */
-    /* ------------------------------------------------------------------ */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    /* ── Dynamic state classes — manipulated by app.js ─────────────────────
+       Tailwind cannot handle classes added/removed at runtime, so these live
+       in plain CSS.  Keep class names exactly as app.js expects them.        */
 
-    :root {
-      --bg:       #08080f;
-      --surface:  #10101c;
-      --border:   #1c1c2e;
-      --text:     #c8cedd;
-      --muted:    #484d60;
-      --font:     'Courier New', Courier, monospace;
-
-      /* LED colours */
-      --led-idle:      #4a3200;
-      --led-idle-glow: #c87800;
-      --led-connected: #ffffff;
-      --led-con-glow:  #ffffff;
-      --led-err-glow:  #ff3040;
-    }
-
-    html, body {
-      height: 100%;
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--font);
-      font-size: 13px;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Header                                                              */
-    /* ------------------------------------------------------------------ */
-    header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 20px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      flex-shrink: 0;
-    }
-
-    header h1 { font-size: 13px; letter-spacing: 0.12em; color: #fff; }
-    header .sub { font-size: 11px; color: var(--muted); margin-left: 4px; }
-
-    /* ------------------------------------------------------------------ */
-    /* Main layout                                                         */
-    /* ------------------------------------------------------------------ */
-    main {
-      flex: 1;
-      padding: 28px 20px 80px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 20px;
-      overflow-y: auto;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Sensor row  (card + data panel side-by-side)                       */
-    /* ------------------------------------------------------------------ */
-    .sensor-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 20px;
-      width: 100%;
-      max-width: 1300px;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Device card                                                         */
-    /* ------------------------------------------------------------------ */
-    .device-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 32px 36px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 22px;
-      flex-shrink: 0;
-      width: 280px;
-    }
-
-    .device-card.idle      { border-color: #2a1a00; }
-    .device-card.detected  { border-color: #3a3a3a; }
-    .device-card.connected { border-color: rgba(255,255,255,0.35); box-shadow: 0 0 28px rgba(255,255,255,0.05); }
-    .device-card.error     { border-color: #5a0010; }
-
-    /* Sensor label badge */
-    .sensor-badge {
-      font-size: 9px;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      color: var(--muted);
-      background: #0d0d1a;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 3px 10px;
-      align-self: stretch;
-      text-align: center;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* LED indicator                                                       */
-    /* ------------------------------------------------------------------ */
-    .led-wrap {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .led {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      /* NO transition — fights animation when switching states */
-    }
-
-    .led.idle {
-      background: var(--led-idle-glow);
-      box-shadow: 0 0 6px var(--led-idle-glow);
-      animation: pulse-amber 2.5s ease-in-out infinite;
-    }
-
-    .led.detected {
-      background: #aaa;
-      box-shadow: 0 0 8px #aaa;
-      animation: pulse-white 1.8s ease-in-out infinite;
-    }
-
-    .led.connected {
-      background: var(--led-connected);
-      box-shadow: 0 0 8px var(--led-con-glow), 0 0 22px rgba(255,255,255,0.35);
-      animation: none;
-    }
-
-    .led.error {
-      background: var(--led-err-glow);
-      box-shadow: 0 0 10px var(--led-err-glow);
-      animation: blink-red 0.45s step-start infinite;
-    }
+    /* LED dot */
+    .led { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .led.idle      { background:#d1a060; animation:pulse-amber 2.5s ease-in-out infinite; }
+    .led.detected  { background:#999; animation:pulse-gray 1.8s ease-in-out infinite; }
+    .led.connected { background:#e05520; box-shadow:0 0 0 3px rgba(224,85,32,0.25); animation:none; }
+    .led.error     { background:#dc2626; animation:blink-red .45s step-start infinite; }
 
     @keyframes pulse-amber {
-      0%, 100% { background: var(--led-idle); box-shadow: 0 0 3px var(--led-idle-glow); opacity: 0.5; }
-      50%       { background: var(--led-idle-glow); box-shadow: 0 0 14px var(--led-idle-glow), 0 0 28px rgba(200,120,0,0.3); opacity: 1; }
+      0%,100% { background:#c8a060; opacity:.5; }
+      50%     { background:#e0b060; opacity:1; }
     }
-
-    @keyframes pulse-white {
-      0%, 100% { background: #444; box-shadow: 0 0 4px #666; opacity: 0.5; }
-      50%       { background: #ccc; box-shadow: 0 0 16px #ccc, 0 0 32px rgba(255,255,255,0.2); opacity: 1; }
+    @keyframes pulse-gray {
+      0%,100% { background:#aaa; opacity:.5; }
+      50%     { background:#ccc; opacity:1; }
     }
-
     @keyframes blink-red {
-      0%, 49%  { opacity: 1; }
-      50%, 100% { opacity: 0.08; }
+      0%,49%  { opacity:1; }
+      50%,100%{ opacity:.15; }
     }
 
-    /* ------------------------------------------------------------------ */
-    /* LED label                                                           */
-    /* ------------------------------------------------------------------ */
-    .led-label {
-      font-size: 10px;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
+    /* LED label */
+    .led-label { font-size:10px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; }
+    .led-label.idle      { color:#a87840; }
+    .led-label.detected  { color:#888; }
+    .led-label.connected { color:#e05520; }
+    .led-label.error     { color:#dc2626; }
 
-    .led-label.idle      { color: #8a6000; }
-    .led-label.detected  { color: #888; }
-    .led-label.connected { color: #ccc; }
-    .led-label.error     { color: #ff3040; }
-
-    /* ------------------------------------------------------------------ */
-    /* Device info                                                         */
-    /* ------------------------------------------------------------------ */
-    .device-info { text-align: center; line-height: 1.6; }
-    .device-name { font-size: 13px; color: #fff; letter-spacing: 0.06em; margin-bottom: 4px; }
-    .device-desc { font-size: 10px; color: var(--muted); }
-
-    /* ------------------------------------------------------------------ */
-    /* Button                                                              */
-    /* ------------------------------------------------------------------ */
-    .btn {
-      padding: 9px 24px;
-      border-radius: 6px;
-      border: none;
-      font-family: var(--font);
-      font-size: 11px;
-      letter-spacing: 0.1em;
-      cursor: pointer;
-      transition: opacity 0.15s, transform 0.1s;
-      text-transform: uppercase;
-      width: 100%;
-    }
-
-    .btn:active   { transform: scale(0.97); }
-    .btn:disabled { opacity: 0.35; cursor: default; transform: none; }
-
-    .btn-connect    { background: #fff;    color: #000; }
-    .btn-disconnect { background: #1e1e2e; color: #ff3040; border: 1px solid #ff3040; }
-    .btn-retry      { background: #1e1e2e; color: #c87800; border: 1px solid #c87800; }
-
-    /* ------------------------------------------------------------------ */
-    /* Data panel  (appears to the right of the card when connected)      */
-    /* ------------------------------------------------------------------ */
-    .data-panel {
-      display: none;
-      flex: 1;
-      min-width: 0;
-      background: var(--surface);
-      border: 1px solid var(--border);
+    /* Device card — layout lives here so app.js className replacement can't break it */
+    .device-card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
       border-radius: 12px;
-      padding: 20px 20px 20px;
-    }
-
-    .data-panel.visible { display: block; }
-
-    .data-panel-title {
-      font-size: 9px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 14px;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Stat grid                                                           */
-    /* ------------------------------------------------------------------ */
-    .stat-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .stat-card {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px 10px;
-      text-align: center;
-    }
-
-    .stat-card .label {
-      font-size: 9px;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 6px;
-    }
-
-    .stat-card .value  { font-size: 20px; color: #fff; letter-spacing: 0.03em; }
-    .stat-card .unit   { font-size: 10px; color: var(--muted); margin-left: 2px; }
-
-    /* ------------------------------------------------------------------ */
-    /* Signal bar                                                          */
-    /* ------------------------------------------------------------------ */
-    .bar-wrap {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px 14px;
-      margin-bottom: 10px;
-    }
-
-    .bar-label {
-      display: flex;
-      justify-content: space-between;
-      font-size: 10px;
-      color: var(--muted);
-      margin-bottom: 8px;
-    }
-
-    .bar-track  { height: 7px; background: #1a1a2a; border-radius: 99px; overflow: hidden; }
-    .bar-fill   {
-      height: 100%;
-      border-radius: 99px;
-      background: linear-gradient(90deg, #00e5ff 0%, #ffffff 100%);
-      transition: width 0.12s ease-out;
-      width: 0%;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Activity badge                                                      */
-    /* ------------------------------------------------------------------ */
-    .activity-badge {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 14px;
+      padding: 16px 20px;
       display: flex;
       align-items: center;
-      gap: 10px;
-      font-size: 11px;
-      color: var(--muted);
-      letter-spacing: 0.06em;
-      margin-bottom: 10px;
-    }
-
-    .activity-dot {
-      width: 9px; height: 9px;
-      border-radius: 50%;
-      background: var(--muted);
+      justify-content: space-between;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06);
       flex-shrink: 0;
-      transition: background 0.15s, box-shadow 0.15s;
+      transition: border-color .3s, box-shadow .3s;
     }
+    .device-card.idle      { border-color:#e5e7eb; }
+    .device-card.detected  { border-color:#d1d5db; }
+    .device-card.connected { border-color:#e05520; box-shadow:0 0 0 3px rgba(224,85,32,0.1); }
+    .device-card.error     { border-color:#fca5a5; }
 
-    .activity-badge.active .activity-dot { background: #00e5ff; box-shadow: 0 0 8px #00e5ff; }
-    .activity-badge.active { color: #ccc; border-color: #00e5ff44; }
+    /* Buttons */
+    .btn { font-family:inherit; font-size:11px; font-weight:600; letter-spacing:.1em;
+           text-transform:uppercase; cursor:pointer; transition:opacity .15s, transform .1s;
+           padding:8px 20px; border-radius:8px; }
+    .btn:active   { transform:scale(.97); }
+    .btn:disabled { opacity:.35; cursor:default; transform:none; }
+    .btn.btn-connect    { background:#e05520; color:#fff; border:none; box-shadow:0 1px 8px rgba(224,85,32,0.3); }
+    .btn.btn-connect:hover:not(:disabled) { opacity:.88; }
+    .btn.btn-disconnect { background:transparent; color:#dc2626; border:1px solid #fca5a5; }
+    .btn.btn-disconnect:hover:not(:disabled) { background:#fef2f2; }
+    .btn.btn-retry      { background:transparent; color:#e05520; border:1px solid #fcd9c8; }
+    .btn.btn-retry:hover:not(:disabled) { background:#fff7f5; }
 
-    /* ------------------------------------------------------------------ */
-    /* Range-Doppler heatmap                                               */
-    /* ------------------------------------------------------------------ */
-    .rd-plot {
-      width: 100%;
-      height: 380px;
-      border-radius: 6px;
-      overflow: hidden;
-      background: #0d0d1a;
+    /* Data panel — hidden until .visible is added */
+    .data-panel         { display:none; }
+    .data-panel.visible { display:flex; flex-direction:column; }
+
+    /* Activity badge */
+    .activity-badge { display:none !important; }
+    .activity-badge .activity-dot {
+      width:8px; height:8px; border-radius:50%; background:#d1d5db; flex-shrink:0;
+      transition:background .2s, box-shadow .2s;
     }
+    .activity-badge.active .activity-dot { background:#e05520; box-shadow:0 0 6px rgba(224,85,32,.6); }
+    .activity-badge.active { border-color:#fcd9c8 !important; background:#fff7f5 !important; color:#c04010 !important; }
 
-    /* ------------------------------------------------------------------ */
-    /* Divider between sensor rows                                         */
-    /* ------------------------------------------------------------------ */
-    .sensor-divider {
-      width: 100%;
-      max-width: 1300px;
-      border: none;
-      border-top: 1px solid var(--border);
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Log bar                                                             */
-    /* ------------------------------------------------------------------ */
-    .log-panel {
-      position: fixed;
-      bottom: 0; left: 0; right: 0;
-      background: #080810;
-      border-top: 1px solid var(--border);
-      padding: 8px 20px;
-      font-size: 11px;
-      color: var(--muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .log-panel span { color: #3a3a5c; margin-right: 8px; }
+    /* Signal bar */
+    .bar-fill { height:100%; border-radius:99px; background:linear-gradient(90deg,#fcd9c8,#e05520);
+                transition:width .12s ease-out; width:0%; }
   </style>
 </head>
-<body>
 
-  <header>
-    <h1>BGT60TR13C &nbsp;/&nbsp; RADAR DASHBOARD</h1>
-    <span class="sub">Infineon XENSIV™ 60 GHz FMCW — Dual Sensor</span>
+<body class="h-full font-sans antialiased overflow-hidden flex flex-col bg-gray-50 text-gray-900">
+
+  <!-- ── Header ──────────────────────────────────────────────────────────── -->
+  <header class="flex-shrink-0 bg-white border-b-2 border-brand px-6 py-3 flex items-center justify-between shadow-sm">
+    <div class="flex items-center gap-4">
+      <!-- Langara logo -->
+      <img src="langara-logo.svg" alt="Langara at Musqueam" class="h-9 w-auto">
+      <div class="w-px h-6 bg-gray-200"></div>
+      <!-- ARC logo -->
+      <img src="arc-logo.svg" alt="ARC" class="h-7 w-auto">
+      <div class="w-px h-6 bg-gray-200"></div>
+      <div>
+        <div class="text-xs font-semibold uppercase tracking-widest text-gray-800">Radar Dashboard</div>
+        <div class="text-[10px] text-gray-400 tracking-wide">Infineon XENSIV™ BGT60TR13C · Dual Sensor</div>
+      </div>
+    </div>
   </header>
 
-  <main>
+  <!-- ── Main — 2-column sensor grid ────────────────────────────────────── -->
+  <main class="flex-1 overflow-hidden p-5 grid grid-cols-2 gap-5">
 
-    <!-- ═══════════════  SENSOR A  ═══════════════ -->
-    <div class="sensor-row" id="sensor-row-0">
+    <!-- ══ SENSOR A ══ -->
+    <section class="flex flex-col gap-4 min-h-0" id="sensor-a">
 
+      <!-- Device card -->
       <div class="device-card idle" id="card-0">
-        <div class="sensor-badge">Sensor A</div>
-        <div class="led-wrap">
-          <div class="led idle" id="led-0"></div>
-          <div class="led-label idle" id="led-label-0">Scanning…</div>
-        </div>
-        <div class="device-info">
-          <div class="device-name">BGT60TR13C</div>
-          <div class="device-desc" id="device-desc-0">Looking for device…</div>
+        <div class="flex items-center gap-4">
+          <div class="flex flex-col items-center gap-1">
+            <div class="led idle" id="led-0"></div>
+          </div>
+          <div>
+            <div class="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-0.5">Sensor A</div>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-semibold text-gray-900">BGT60TR13C</span>
+              <span class="led-label idle" id="led-label-0">No device</span>
+            </div>
+            <div class="text-[10px] text-gray-400 mt-0.5" id="device-desc-0">Looking for device…</div>
+          </div>
         </div>
         <button class="btn btn-connect" id="action-btn-0" disabled>Connect</button>
       </div>
 
-      <div class="data-panel" id="data-panel-0">
-        <div class="data-panel-title">Sensor A — Live Radar Data</div>
-        <div class="stat-grid">
-          <div class="stat-card">
-            <div class="label">Peak signal</div>
-            <div class="value"><span id="d-peak-0">—</span><span class="unit">dB</span></div>
+      <!-- Data panel -->
+      <div class="data-panel flex-1 bg-white border border-gray-200 rounded-xl p-5 gap-4 shadow-sm overflow-y-auto min-h-0" id="data-panel-0">
+
+        <div class="flex items-center flex-shrink-0">
+          <span class="w-2 h-2 rounded-full bg-brand flex-shrink-0 mr-2"></span>
+          <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Sensor A — Live Radar Data</span>
+        </div>
+        <div class="hidden" id="d-activity-0"><span id="d-activity-text-0"></span></div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-3 gap-3 flex-shrink-0">
+          <div class="bg-gray-50 border border-gray-100 rounded-lg p-3 text-center">
+            <div class="text-[9px] text-gray-400 uppercase font-bold tracking-wider mb-1">Peak Signal</div>
+            <div class="text-2xl font-light text-gray-900"><span id="d-peak-0">—</span><span class="text-xs text-gray-400 ml-1">dB</span></div>
           </div>
-          <div class="stat-card">
-            <div class="label">Est. range</div>
-            <div class="value"><span id="d-range-0">—</span><span class="unit">cm</span></div>
+          <div class="bg-gray-50 border border-gray-100 rounded-lg p-3 text-center">
+            <div class="text-[9px] text-gray-400 uppercase font-bold tracking-wider mb-1">Est. Range</div>
+            <div class="text-2xl font-light text-gray-900"><span id="d-range-0">—</span><span class="text-xs text-gray-400 ml-1">cm</span></div>
           </div>
-          <div class="stat-card">
-            <div class="label">Velocity</div>
-            <div class="value"><span id="d-vel-0">—</span><span class="unit">km/h</span></div>
+          <div class="bg-gray-50 border border-gray-100 rounded-lg p-3 text-center">
+            <div class="text-[9px] text-gray-400 uppercase font-bold tracking-wider mb-1">Velocity</div>
+            <div class="text-2xl font-light text-gray-900"><span id="d-vel-0">—</span><span class="text-xs text-gray-400 ml-1">km/h</span></div>
           </div>
         </div>
-        <div class="bar-wrap">
-          <div class="bar-label">
-            <span>Signal strength</span>
+
+        <!-- Signal bar -->
+        <div class="bg-gray-50 border border-gray-100 rounded-lg px-4 py-3 flex-shrink-0">
+          <div class="flex justify-between text-[9px] font-semibold uppercase tracking-wider text-gray-400 mb-2">
+            <span>Signal Strength</span>
             <span id="d-fps-0">— fps</span>
           </div>
-          <div class="bar-track"><div class="bar-fill" id="d-bar-0"></div></div>
+          <div class="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+            <div class="bar-fill" id="d-bar-0"></div>
+          </div>
         </div>
-        <div class="activity-badge" id="d-activity-0">
-          <div class="activity-dot"></div>
-          <span id="d-activity-text-0">Waiting for signal…</span>
-        </div>
-        <div class="rd-plot" id="rd-plot-0"></div>
+
+        <!-- Heatmap -->
+        <div class="flex-1 min-h-0 rounded-lg overflow-hidden border border-gray-200" style="min-height:260px" id="rd-plot-0"></div>
       </div>
+    </section>
 
-    </div><!-- /sensor-row-0 -->
+    <!-- ══ SENSOR B ══ -->
+    <section class="flex flex-col gap-4 min-h-0" id="sensor-b">
 
-    <hr class="sensor-divider" />
-
-    <!-- ═══════════════  SENSOR B  ═══════════════ -->
-    <div class="sensor-row" id="sensor-row-1">
-
+      <!-- Device card -->
       <div class="device-card idle" id="card-1">
-        <div class="sensor-badge">Sensor B</div>
-        <div class="led-wrap">
-          <div class="led idle" id="led-1"></div>
-          <div class="led-label idle" id="led-label-1">Scanning…</div>
-        </div>
-        <div class="device-info">
-          <div class="device-name">BGT60TR13C</div>
-          <div class="device-desc" id="device-desc-1">Looking for device…</div>
+        <div class="flex items-center gap-4">
+          <div class="flex flex-col items-center gap-1">
+            <div class="led idle" id="led-1"></div>
+          </div>
+          <div>
+            <div class="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-0.5">Sensor B</div>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-semibold text-gray-900">BGT60TR13C</span>
+              <span class="led-label idle" id="led-label-1">No device</span>
+            </div>
+            <div class="text-[10px] text-gray-400 mt-0.5" id="device-desc-1">Looking for device…</div>
+          </div>
         </div>
         <button class="btn btn-connect" id="action-btn-1" disabled>Connect</button>
       </div>
 
-      <div class="data-panel" id="data-panel-1">
-        <div class="data-panel-title">Sensor B — Live Radar Data</div>
-        <div class="stat-grid">
-          <div class="stat-card">
-            <div class="label">Peak signal</div>
-            <div class="value"><span id="d-peak-1">—</span><span class="unit">dB</span></div>
+      <!-- Data panel -->
+      <div class="data-panel flex-1 bg-white border border-gray-200 rounded-xl p-5 gap-4 shadow-sm overflow-y-auto min-h-0" id="data-panel-1">
+
+        <div class="flex items-center flex-shrink-0">
+          <span class="w-2 h-2 rounded-full bg-brand flex-shrink-0 mr-2"></span>
+          <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Sensor B — Live Radar Data</span>
+        </div>
+        <div class="hidden" id="d-activity-1"><span id="d-activity-text-1"></span></div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-3 gap-3 flex-shrink-0">
+          <div class="bg-gray-50 border border-gray-100 rounded-lg p-3 text-center">
+            <div class="text-[9px] text-gray-400 uppercase font-bold tracking-wider mb-1">Peak Signal</div>
+            <div class="text-2xl font-light text-gray-900"><span id="d-peak-1">—</span><span class="text-xs text-gray-400 ml-1">dB</span></div>
           </div>
-          <div class="stat-card">
-            <div class="label">Est. range</div>
-            <div class="value"><span id="d-range-1">—</span><span class="unit">cm</span></div>
+          <div class="bg-gray-50 border border-gray-100 rounded-lg p-3 text-center">
+            <div class="text-[9px] text-gray-400 uppercase font-bold tracking-wider mb-1">Est. Range</div>
+            <div class="text-2xl font-light text-gray-900"><span id="d-range-1">—</span><span class="text-xs text-gray-400 ml-1">cm</span></div>
           </div>
-          <div class="stat-card">
-            <div class="label">Velocity</div>
-            <div class="value"><span id="d-vel-1">—</span><span class="unit">km/h</span></div>
+          <div class="bg-gray-50 border border-gray-100 rounded-lg p-3 text-center">
+            <div class="text-[9px] text-gray-400 uppercase font-bold tracking-wider mb-1">Velocity</div>
+            <div class="text-2xl font-light text-gray-900"><span id="d-vel-1">—</span><span class="text-xs text-gray-400 ml-1">km/h</span></div>
           </div>
         </div>
-        <div class="bar-wrap">
-          <div class="bar-label">
-            <span>Signal strength</span>
+
+        <!-- Signal bar -->
+        <div class="bg-gray-50 border border-gray-100 rounded-lg px-4 py-3 flex-shrink-0">
+          <div class="flex justify-between text-[9px] font-semibold uppercase tracking-wider text-gray-400 mb-2">
+            <span>Signal Strength</span>
             <span id="d-fps-1">— fps</span>
           </div>
-          <div class="bar-track"><div class="bar-fill" id="d-bar-1"></div></div>
+          <div class="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+            <div class="bar-fill" id="d-bar-1"></div>
+          </div>
         </div>
-        <div class="activity-badge" id="d-activity-1">
-          <div class="activity-dot"></div>
-          <span id="d-activity-text-1">Waiting for signal…</span>
-        </div>
-        <div class="rd-plot" id="rd-plot-1"></div>
-      </div>
 
-    </div><!-- /sensor-row-1 -->
+        <!-- Heatmap -->
+        <div class="flex-1 min-h-0 rounded-lg overflow-hidden border border-gray-200" style="min-height:260px" id="rd-plot-1"></div>
+      </div>
+    </section>
 
   </main>
 
-  <div class="log-panel">
-    <span>&gt;</span>
-    <span id="log-msg">Initialising…</span>
-  </div>
+  <span class="hidden" id="log-msg"></span>
 
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script type="module" src="/js/app.js"></script>

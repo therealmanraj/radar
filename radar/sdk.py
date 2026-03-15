@@ -17,12 +17,12 @@ from .base import RadarSource
 
 # Physical axis constants (BGT60TR13C defaults)
 _C          = 3e8
-_BW         = 1.5e9                     # default sweep bandwidth  ~1.5 GHz
+_BW         = 6e9                       # default sweep bandwidth ~6 GHz (57–63 GHz)
 _FC         = 60.75e9
 _LAMBDA     = _C / _FC
 _CHIRP_DT   = 0.5e-3                    # chirp repetition time
 
-RANGE_RES_M  = _C / (2 * _BW)          # ~0.10 m per range bin
+RANGE_RES_M  = _C / (2 * _BW)          # ~0.025 m per range bin (2.5 cm)
 
 # Default device frame dimensions (no custom config)
 NUM_RX      = 3
@@ -32,7 +32,7 @@ NUM_RANGE   = NUM_SAMPLES // 2          # 32 one-sided range bins
 
 V_MAX_MS    = _LAMBDA / (4 * _CHIRP_DT)           # ~2.47 m/s
 V_MAX_KMH   = V_MAX_MS * 3.6                      # ~8.89 km/h
-MAX_RANGE_CM = NUM_RANGE * RANGE_RES_M * 100      # 320 cm
+MAX_RANGE_CM = NUM_RANGE * RANGE_RES_M * 100      # 80 cm
 
 # Extent for imshow: [v_min_kmh, v_max_kmh, range_min_cm, range_max_cm]
 RD_EXTENT   = [-V_MAX_KMH, V_MAX_KMH, 0, MAX_RANGE_CM]
@@ -48,9 +48,6 @@ class InfineonRadar(RadarSource):
     Returns a 2D range-doppler magnitude map shaped (64, 32):
       axis 0 = Doppler / velocity  (row 32 = zero velocity after fftshift)
       axis 1 = range bins          (bin 0 = closest, bin 31 = ~3.2 m)
-
-    Pass uuid= to open a specific board when multiple are connected.
-    Leave uuid=None to open the first available board.
     """
 
     def __init__(self, uuid: str | None = None):
@@ -61,8 +58,7 @@ class InfineonRadar(RadarSource):
     def open(self) -> None:
         from ifxradarsdk.fmcw import DeviceFmcw
 
-        # Open a specific board by UUID, or the first available board
-        self._device = DeviceFmcw(uuid=self._uuid) if self._uuid is not None else DeviceFmcw()
+        self._device = DeviceFmcw(uuid=self._uuid) if self._uuid else DeviceFmcw()
 
         # Drain stale frames from hardware FIFO (same as detect_hand.py drain_buffer)
         for _ in range(10):
