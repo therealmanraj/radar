@@ -6,9 +6,6 @@
   <title>BGT60TR13C Radar Dashboard</title>
 
   <style>
-    /* ------------------------------------------------------------------ */
-    /* Base                                                                */
-    /* ------------------------------------------------------------------ */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
@@ -18,15 +15,10 @@
       --text:     #c8cedd;
       --muted:    #484d60;
       --font:     'Courier New', Courier, monospace;
-
-      /* LED colours */
-      --led-idle:      #4a3200;   /* amber dark */
+      --led-idle:      #4a3200;
       --led-idle-glow: #c87800;
-      --led-detected:  #2a2a2a;   /* dim white */
-      --led-det-glow:  #888888;
       --led-connected: #ffffff;
       --led-con-glow:  #ffffff;
-      --led-error:     #8b0000;
       --led-err-glow:  #ff3040;
     }
 
@@ -40,9 +32,7 @@
       flex-direction: column;
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Header                                                              */
-    /* ------------------------------------------------------------------ */
+    /* ── Header ─────────────────────────────────────────────────────────── */
     header {
       display: flex;
       align-items: center;
@@ -52,414 +42,269 @@
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
+    header h1  { font-size: 13px; letter-spacing: 0.12em; color: #fff; }
+    header .sub { font-size: 11px; color: var(--muted); margin-left: 4px; }
 
-    header h1 {
-      font-size: 13px;
-      letter-spacing: 0.12em;
-      color: #fff;
-    }
-
-    header .sub {
-      font-size: 11px;
-      color: var(--muted);
-      margin-left: 4px;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Main area                                                           */
-    /* ------------------------------------------------------------------ */
+    /* ── Main ───────────────────────────────────────────────────────────── */
     main {
       flex: 1;
+      padding: 24px 20px 80px;
       display: flex;
+      flex-direction: column;
       align-items: center;
-      justify-content: center;
-      padding: 32px 16px;
+      gap: 20px;
+      overflow-y: auto;
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Device card                                                         */
-    /* ------------------------------------------------------------------ */
+    /* ── Sensor row  (card + data panel side-by-side) ───────────────────── */
+    .sensor-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+      width: 100%;
+      max-width: 1300px;
+    }
+
+    /* ── Device card ────────────────────────────────────────────────────── */
     .device-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 48px 56px;
+      padding: 32px 36px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 28px;
-      min-width: 360px;
-      max-width: 480px;
-      width: 100%;
+      gap: 22px;
+      flex-shrink: 0;
+      width: 280px;
     }
-
-    /* Card border mirrors LED state */
     .device-card.idle      { border-color: #2a1a00; }
     .device-card.detected  { border-color: #3a3a3a; }
-    .device-card.connected { border-color: rgba(255,255,255,0.35); box-shadow: 0 0 32px rgba(255,255,255,0.06); }
+    .device-card.connected { border-color: rgba(255,255,255,0.35); box-shadow: 0 0 28px rgba(255,255,255,0.05); }
     .device-card.error     { border-color: #5a0010; }
 
-    /* ------------------------------------------------------------------ */
-    /* LED indicator                                                       */
-    /* ------------------------------------------------------------------ */
-    .led-wrap {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 14px;
+    .sensor-badge {
+      font-size: 9px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: #0d0d1a;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 10px;
+      align-self: stretch;
+      text-align: center;
     }
+
+    /* ── LED ────────────────────────────────────────────────────────────── */
+    .led-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
 
     .led {
-      width: 36px;
-      height: 36px;
+      width: 32px; height: 32px;
       border-radius: 50%;
-      /* NO transition — it fights with animation when switching states */
+      /* NO transition — fights animation */
     }
+    .led.idle      { background: var(--led-idle-glow); box-shadow: 0 0 6px var(--led-idle-glow); animation: pulse-amber 2.5s ease-in-out infinite; }
+    .led.detected  { background: #aaa; box-shadow: 0 0 8px #aaa; animation: pulse-white 1.8s ease-in-out infinite; }
+    .led.connected { background: var(--led-connected); box-shadow: 0 0 8px var(--led-con-glow), 0 0 22px rgba(255,255,255,0.35); animation: none; }
+    .led.error     { background: var(--led-err-glow); box-shadow: 0 0 10px var(--led-err-glow); animation: blink-red 0.45s step-start infinite; }
 
-    /* State: idle — no device detected, slow amber pulse */
-    .led.idle {
-      background: var(--led-idle-glow);
-      box-shadow: 0 0 6px var(--led-idle-glow);
-      animation: pulse-amber 2.5s ease-in-out infinite;
-    }
-
-    /* State: detected — device found, not yet connected, slow white pulse */
-    .led.detected {
-      background: #aaa;
-      box-shadow: 0 0 8px #aaa;
-      animation: pulse-white 1.8s ease-in-out infinite;
-    }
-
-    /* State: connected — solid white, static glow */
-    .led.connected {
-      background: var(--led-connected);
-      box-shadow:
-        0 0 8px  var(--led-con-glow),
-        0 0 22px rgba(255, 255, 255, 0.35),
-        0 0 44px rgba(255, 255, 255, 0.12);
-      animation: none;
-    }
-
-    /* State: error — fast red blink */
-    .led.error {
-      background: var(--led-err-glow);
-      box-shadow: 0 0 10px var(--led-err-glow);
-      animation: blink-red 0.45s step-start infinite;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* LED keyframes                                                       */
-    /* ------------------------------------------------------------------ */
     @keyframes pulse-amber {
-      0%, 100% {
-        background: var(--led-idle);
-        box-shadow: 0 0 3px var(--led-idle-glow);
-        opacity: 0.5;
-      }
-      50% {
-        background: var(--led-idle-glow);
-        box-shadow: 0 0 14px var(--led-idle-glow), 0 0 28px rgba(200, 120, 0, 0.3);
-        opacity: 1;
-      }
+      0%,100% { background: var(--led-idle); box-shadow: 0 0 3px var(--led-idle-glow); opacity:.5; }
+      50%     { background: var(--led-idle-glow); box-shadow: 0 0 14px var(--led-idle-glow),0 0 28px rgba(200,120,0,.3); opacity:1; }
     }
-
     @keyframes pulse-white {
-      0%, 100% {
-        background: #444;
-        box-shadow: 0 0 4px #666;
-        opacity: 0.5;
-      }
-      50% {
-        background: #ccc;
-        box-shadow: 0 0 16px #ccc, 0 0 32px rgba(255, 255, 255, 0.2);
-        opacity: 1;
-      }
+      0%,100% { background:#444; box-shadow:0 0 4px #666; opacity:.5; }
+      50%     { background:#ccc; box-shadow:0 0 16px #ccc,0 0 32px rgba(255,255,255,.2); opacity:1; }
     }
-
     @keyframes blink-red {
-      0%, 49%  { opacity: 1; }
-      50%, 100% { opacity: 0.08; }
+      0%,49%  { opacity:1; }
+      50%,100%{ opacity:.08; }
     }
 
-    /* ------------------------------------------------------------------ */
-    /* LED status label                                                    */
-    /* ------------------------------------------------------------------ */
-    .led-label {
-      font-size: 10px;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
+    .led-label { font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+    .led-label.idle      { color:#8a6000; }
+    .led-label.detected  { color:#888; }
+    .led-label.connected { color:#ccc; }
+    .led-label.error     { color:#ff3040; }
 
-    .led-label.idle      { color: #8a6000; }
-    .led-label.detected  { color: #888; }
-    .led-label.connected { color: #ccc; }
-    .led-label.error     { color: #ff3040; }
+    /* ── Device info ─────────────────────────────────────────────────────── */
+    .device-info { text-align:center; line-height:1.6; }
+    .device-name { font-size:13px; color:#fff; letter-spacing:.06em; margin-bottom:4px; }
+    .device-desc { font-size:10px; color:var(--muted); }
 
-    /* ------------------------------------------------------------------ */
-    /* Device info                                                         */
-    /* ------------------------------------------------------------------ */
-    .device-info {
-      text-align: center;
-      line-height: 1.6;
-    }
-
-    .device-name {
-      font-size: 15px;
-      color: #fff;
-      letter-spacing: 0.06em;
-      margin-bottom: 4px;
-    }
-
-    .device-desc {
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Connect button                                                      */
-    /* ------------------------------------------------------------------ */
+    /* ── Button ─────────────────────────────────────────────────────────── */
     .btn {
-      padding: 10px 32px;
-      border-radius: 6px;
-      border: none;
-      font-family: var(--font);
-      font-size: 12px;
-      letter-spacing: 0.1em;
-      cursor: pointer;
-      transition: opacity 0.15s, transform 0.1s;
-      text-transform: uppercase;
+      padding:9px 24px; border-radius:6px; border:none;
+      font-family:var(--font); font-size:11px; letter-spacing:.1em;
+      cursor:pointer; transition:opacity .15s,transform .1s;
+      text-transform:uppercase; width:100%;
     }
+    .btn:active   { transform:scale(.97); }
+    .btn:disabled { opacity:.35; cursor:default; transform:none; }
+    .btn-connect    { background:#fff; color:#000; }
+    .btn-disconnect { background:#1e1e2e; color:#ff3040; border:1px solid #ff3040; }
+    .btn-retry      { background:#1e1e2e; color:#c87800; border:1px solid #c87800; }
 
-    .btn:active   { transform: scale(0.97); }
-    .btn:disabled { opacity: 0.35; cursor: default; transform: none; }
-
-    .btn-connect    { background: #fff;     color: #000; }
-    .btn-disconnect { background: #1e1e2e; color: #ff3040; border: 1px solid #ff3040; }
-    .btn-retry      { background: #1e1e2e; color: #c87800; border: 1px solid #c87800; }
-
-    /* ------------------------------------------------------------------ */
-    /* Live data panel  (shown only when connected)                       */
-    /* ------------------------------------------------------------------ */
+    /* ── Data panel ─────────────────────────────────────────────────────── */
     .data-panel {
       display: none;
-      width: 100%;
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 0 16px 48px;
+      flex: 1;
+      min-width: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
     }
-
     .data-panel.visible { display: block; }
 
     .data-panel-title {
-      font-size: 10px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 12px;
-      text-align: center;
+      font-size:9px; letter-spacing:.18em; text-transform:uppercase;
+      color:var(--muted); margin-bottom:14px;
     }
 
-    .stat-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-      margin-bottom: 14px;
-    }
+    /* ── Stat grid ───────────────────────────────────────────────────────── */
+    .stat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
+    .stat-card { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:12px 10px; text-align:center; }
+    .stat-card .label { font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+    .stat-card .value { font-size:20px; color:#fff; letter-spacing:.03em; }
+    .stat-card .unit  { font-size:10px; color:var(--muted); margin-left:2px; }
 
-    .stat-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 14px 12px;
-      text-align: center;
-    }
+    /* ── Signal bar ──────────────────────────────────────────────────────── */
+    .bar-wrap   { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:10px; }
+    .bar-label  { display:flex; justify-content:space-between; font-size:10px; color:var(--muted); margin-bottom:8px; }
+    .bar-track  { height:7px; background:#1a1a2a; border-radius:99px; overflow:hidden; }
+    .bar-fill   { height:100%; border-radius:99px; background:linear-gradient(90deg,#00e5ff,#fff); transition:width .12s ease-out; width:0%; }
 
-    .stat-card .label {
-      font-size: 9px;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 6px;
-    }
-
-    .stat-card .value {
-      font-size: 22px;
-      color: #fff;
-      letter-spacing: 0.03em;
-    }
-
-    .stat-card .unit {
-      font-size: 10px;
-      color: var(--muted);
-      margin-left: 2px;
-    }
-
-    /* Signal bar */
-    .bar-wrap {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 14px 16px;
-      margin-bottom: 10px;
-    }
-
-    .bar-label {
-      display: flex;
-      justify-content: space-between;
-      font-size: 10px;
-      color: var(--muted);
-      margin-bottom: 8px;
-    }
-
-    .bar-track {
-      height: 8px;
-      background: #1a1a2a;
-      border-radius: 99px;
-      overflow: hidden;
-    }
-
-    .bar-fill {
-      height: 100%;
-      border-radius: 99px;
-      background: linear-gradient(90deg, #00e5ff 0%, #ffffff 100%);
-      transition: width 0.12s ease-out;
-      width: 0%;
-    }
-
-    /* Activity badge */
+    /* ── Activity badge ──────────────────────────────────────────────────── */
     .activity-badge {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px 16px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 11px;
-      color: var(--muted);
-      letter-spacing: 0.06em;
+      background:var(--bg); border:1px solid var(--border); border-radius:8px;
+      padding:10px 14px; display:flex; align-items:center; gap:10px;
+      font-size:11px; color:var(--muted); letter-spacing:.06em; margin-bottom:10px;
     }
+    .activity-dot { width:9px; height:9px; border-radius:50%; background:var(--muted); flex-shrink:0; transition:background .15s,box-shadow .15s; }
+    .activity-badge.active .activity-dot { background:#00e5ff; box-shadow:0 0 8px #00e5ff; }
+    .activity-badge.active { color:#ccc; border-color:#00e5ff44; }
 
-    .activity-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--muted);
-      flex-shrink: 0;
-      transition: background 0.15s, box-shadow 0.15s;
-    }
+    /* ── Range-Doppler heatmap ───────────────────────────────────────────── */
+    .rd-plot { width:100%; height:380px; border-radius:6px; overflow:hidden; background:#0d0d1a; }
 
-    .activity-badge.active .activity-dot {
-      background: #00e5ff;
-      box-shadow: 0 0 8px #00e5ff;
-    }
+    /* ── Divider between sensors ─────────────────────────────────────────── */
+    .sensor-divider { width:100%; max-width:1300px; border:none; border-top:1px solid var(--border); }
 
-    .activity-badge.active { color: #ccc; border-color: #00e5ff44; }
-
-    /* ------------------------------------------------------------------ */
-    /* Range-Doppler heatmap                                               */
-    /* ------------------------------------------------------------------ */
-    #rd-plot {
-      width: 100%;
-      height: 420px;
-      margin-top: 14px;
-      border-radius: 8px;
-      overflow: hidden;
-      background: #0d0d1a;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Log                                                                 */
-    /* ------------------------------------------------------------------ */
+    /* ── Log bar ─────────────────────────────────────────────────────────── */
     .log-panel {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: #080810;
-      border-top: 1px solid var(--border);
-      padding: 8px 20px;
-      font-size: 11px;
-      color: var(--muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      position:fixed; bottom:0; left:0; right:0;
+      background:#080810; border-top:1px solid var(--border);
+      padding:8px 20px; font-size:11px; color:var(--muted);
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     }
-
-    .log-panel span {
-      color: #3a3a5c;
-      margin-right: 8px;
-    }
+    .log-panel span { color:#3a3a5c; margin-right:8px; }
   </style>
 </head>
 <body>
 
   <header>
     <h1>BGT60TR13C &nbsp;/&nbsp; RADAR DASHBOARD</h1>
-    <span class="sub">Infineon XENSIV™ 60 GHz FMCW</span>
+    <span class="sub">Infineon XENSIV™ 60 GHz FMCW — Dual Sensor</span>
   </header>
 
   <main>
-    <div class="device-card">
 
-      <!-- LED + state label -->
-      <div class="led-wrap">
-        <div class="led idle" id="led"></div>
-        <div class="led-label idle" id="led-label">Scanning…</div>
+    <!-- ══════════════  SENSOR A  ══════════════ -->
+    <div class="sensor-row">
+
+      <div class="device-card idle" id="card-0">
+        <div class="sensor-badge">Sensor A</div>
+        <div class="led-wrap">
+          <div class="led idle" id="led-0"></div>
+          <div class="led-label idle" id="led-label-0">Scanning…</div>
+        </div>
+        <div class="device-info">
+          <div class="device-name">BGT60TR13C</div>
+          <div class="device-desc" id="device-desc-0">Looking for device…</div>
+        </div>
+        <button class="btn btn-connect" id="action-btn-0" disabled>Connect</button>
       </div>
 
-      <!-- Device name + description -->
-      <div class="device-info">
-        <div class="device-name" id="device-name">BGT60TR13C</div>
-        <div class="device-desc" id="device-desc">Looking for device…</div>
+      <div class="data-panel" id="data-panel-0">
+        <div class="data-panel-title">Sensor A — Live Radar Data</div>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="label">Peak signal</div>
+            <div class="value"><span id="d-peak-0">—</span><span class="unit">dB</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Est. range</div>
+            <div class="value"><span id="d-range-0">—</span><span class="unit">cm</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Velocity</div>
+            <div class="value"><span id="d-vel-0">—</span><span class="unit">km/h</span></div>
+          </div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>Signal strength</span><span id="d-fps-0">— fps</span></div>
+          <div class="bar-track"><div class="bar-fill" id="d-bar-0"></div></div>
+        </div>
+        <div class="activity-badge" id="d-activity-0">
+          <div class="activity-dot"></div>
+          <span id="d-activity-text-0">Waiting for signal…</span>
+        </div>
+        <div class="rd-plot" id="rd-plot-0"></div>
       </div>
-
-      <!-- Action button -->
-      <button class="btn btn-connect" id="action-btn" disabled>Connect</button>
 
     </div>
+
+    <hr class="sensor-divider" />
+
+    <!-- ══════════════  SENSOR B  ══════════════ -->
+    <div class="sensor-row">
+
+      <div class="device-card idle" id="card-1">
+        <div class="sensor-badge">Sensor B</div>
+        <div class="led-wrap">
+          <div class="led idle" id="led-1"></div>
+          <div class="led-label idle" id="led-label-1">Scanning…</div>
+        </div>
+        <div class="device-info">
+          <div class="device-name">BGT60TR13C</div>
+          <div class="device-desc" id="device-desc-1">Looking for device…</div>
+        </div>
+        <button class="btn btn-connect" id="action-btn-1" disabled>Connect</button>
+      </div>
+
+      <div class="data-panel" id="data-panel-1">
+        <div class="data-panel-title">Sensor B — Live Radar Data</div>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="label">Peak signal</div>
+            <div class="value"><span id="d-peak-1">—</span><span class="unit">dB</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Est. range</div>
+            <div class="value"><span id="d-range-1">—</span><span class="unit">cm</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Velocity</div>
+            <div class="value"><span id="d-vel-1">—</span><span class="unit">km/h</span></div>
+          </div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>Signal strength</span><span id="d-fps-1">— fps</span></div>
+          <div class="bar-track"><div class="bar-fill" id="d-bar-1"></div></div>
+        </div>
+        <div class="activity-badge" id="d-activity-1">
+          <div class="activity-dot"></div>
+          <span id="d-activity-text-1">Waiting for signal…</span>
+        </div>
+        <div class="rd-plot" id="rd-plot-1"></div>
+      </div>
+
+    </div>
+
   </main>
 
-  <!-- Live data panel — shown only when WebSocket is connected -->
-  <div class="data-panel" id="data-panel">
-    <div class="data-panel-title">Live Radar Data</div>
-
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="label">Peak signal</div>
-        <div class="value"><span id="d-peak">—</span><span class="unit">dB</span></div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Est. range</div>
-        <div class="value"><span id="d-range">—</span><span class="unit">cm</span></div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Velocity</div>
-        <div class="value"><span id="d-vel">—</span><span class="unit">km/h</span></div>
-      </div>
-    </div>
-
-    <div class="bar-wrap">
-      <div class="bar-label">
-        <span>Signal strength</span>
-        <span id="d-fps">— fps</span>
-      </div>
-      <div class="bar-track">
-        <div class="bar-fill" id="d-bar"></div>
-      </div>
-    </div>
-
-    <div class="activity-badge" id="d-activity">
-      <div class="activity-dot"></div>
-      <span id="d-activity-text">Waiting for signal…</span>
-    </div>
-
-    <!-- Range-Doppler heatmap -->
-    <div id="rd-plot"></div>
-  </div>
-
-  <!-- Status log bar -->
   <div class="log-panel">
     <span>&gt;</span>
     <span id="log-msg">Initialising…</span>

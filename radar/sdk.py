@@ -50,14 +50,15 @@ class InfineonRadar(RadarSource):
       axis 1 = range bins          (bin 0 = closest, bin 31 = ~3.2 m)
     """
 
-    def __init__(self):
+    def __init__(self, uuid: str | None = None):
+        self._uuid       = uuid
         self._device     = None
         self._background = None   # per-antenna EMA: shape (num_rx, num_chirps, num_samples)
 
     def open(self) -> None:
         from ifxradarsdk.fmcw import DeviceFmcw
 
-        self._device = DeviceFmcw()   # use board defaults — no custom config
+        self._device = DeviceFmcw(uuid=self._uuid) if self._uuid else DeviceFmcw()
 
         # Drain stale frames from hardware FIFO (same as detect_hand.py drain_buffer)
         for _ in range(10):
