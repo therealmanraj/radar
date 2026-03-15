@@ -55,8 +55,19 @@
     .led-label.connected { color:#e05520; }
     .led-label.error     { color:#dc2626; }
 
-    /* Device card border states */
-    .device-card { transition: border-color .3s, box-shadow .3s; }
+    /* Device card — layout lives here so app.js className replacement can't break it */
+    .device-card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06);
+      flex-shrink: 0;
+      transition: border-color .3s, box-shadow .3s;
+    }
     .device-card.idle      { border-color:#e5e7eb; }
     .device-card.detected  { border-color:#d1d5db; }
     .device-card.connected { border-color:#e05520; box-shadow:0 0 0 3px rgba(224,85,32,0.1); }
@@ -118,7 +129,7 @@
     <section class="flex flex-col gap-4 min-h-0" id="sensor-a">
 
       <!-- Device card -->
-      <div class="device-card idle bg-white border rounded-xl px-5 py-4 flex items-center justify-between shadow-sm flex-shrink-0" id="card-0">
+      <div class="device-card idle" id="card-0">
         <div class="flex items-center gap-4">
           <div class="flex flex-col items-center gap-1">
             <div class="led idle" id="led-0"></div>
@@ -185,7 +196,7 @@
     <section class="flex flex-col gap-4 min-h-0" id="sensor-b">
 
       <!-- Device card -->
-      <div class="device-card idle bg-white border rounded-xl px-5 py-4 flex items-center justify-between shadow-sm flex-shrink-0" id="card-1">
+      <div class="device-card idle" id="card-1">
         <div class="flex items-center gap-4">
           <div class="flex flex-col items-center gap-1">
             <div class="led idle" id="led-1"></div>
@@ -249,6 +260,16 @@
     </section>
 
   </main>
+
+  <!-- Footer log bar -->
+  <footer class="flex-shrink-0 h-9 bg-white border-t border-gray-200 px-6 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="w-1.5 h-1.5 rounded-full bg-brand animate-pulse flex-shrink-0"></span>
+      <span class="text-[10px] font-bold uppercase tracking-widest text-brand">Log</span>
+      <span class="text-[10px] text-gray-400 font-mono" id="log-msg">Initialising…</span>
+    </div>
+    <div class="text-[10px] text-gray-300 font-mono tracking-wide">BGT60TR13C · FMCW · 60 GHz</div>
+  </footer>
 
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script type="module" src="/js/app.js"></script>
