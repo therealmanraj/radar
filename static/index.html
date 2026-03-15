@@ -150,16 +150,11 @@
       <!-- Data panel -->
       <div class="data-panel flex-1 bg-white border border-gray-200 rounded-xl p-5 gap-4 shadow-sm overflow-y-auto min-h-0" id="data-panel-0">
 
-        <div class="flex items-center justify-between flex-shrink-0">
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-brand flex-shrink-0"></span>
-            <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Sensor A — Live Radar Data</span>
-          </div>
-          <div class="activity-badge flex items-center gap-2 px-3 py-1.5 rounded-full border border-gray-200 bg-gray-50" id="d-activity-0">
-            <div class="activity-dot"></div>
-            <span class="text-[10px] font-semibold text-gray-500" id="d-activity-text-0">Waiting for signal…</span>
-          </div>
+        <div class="flex items-center flex-shrink-0">
+          <span class="w-2 h-2 rounded-full bg-brand flex-shrink-0 mr-2"></span>
+          <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Sensor A — Live Radar Data</span>
         </div>
+        <div class="hidden" id="d-activity-0"><span id="d-activity-text-0"></span></div>
 
         <!-- Stats -->
         <div class="grid grid-cols-3 gap-3 flex-shrink-0">
@@ -217,16 +212,11 @@
       <!-- Data panel -->
       <div class="data-panel flex-1 bg-white border border-gray-200 rounded-xl p-5 gap-4 shadow-sm overflow-y-auto min-h-0" id="data-panel-1">
 
-        <div class="flex items-center justify-between flex-shrink-0">
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-brand flex-shrink-0"></span>
-            <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Sensor B — Live Radar Data</span>
-          </div>
-          <div class="activity-badge flex items-center gap-2 px-3 py-1.5 rounded-full border border-gray-200 bg-gray-50" id="d-activity-1">
-            <div class="activity-dot"></div>
-            <span class="text-[10px] font-semibold text-gray-500" id="d-activity-text-1">Waiting for signal…</span>
-          </div>
+        <div class="flex items-center flex-shrink-0">
+          <span class="w-2 h-2 rounded-full bg-brand flex-shrink-0 mr-2"></span>
+          <span class="text-[9px] font-bold uppercase tracking-widest text-gray-500">Sensor B — Live Radar Data</span>
         </div>
+        <div class="hidden" id="d-activity-1"><span id="d-activity-text-1"></span></div>
 
         <!-- Stats -->
         <div class="grid grid-cols-3 gap-3 flex-shrink-0">
@@ -262,15 +252,7 @@
 
   </main>
 
-  <!-- Footer log bar -->
-  <footer class="flex-shrink-0 h-9 bg-white border-t border-gray-200 px-6 flex items-center justify-between">
-    <div class="flex items-center gap-3">
-      <span class="w-1.5 h-1.5 rounded-full bg-brand animate-pulse flex-shrink-0"></span>
-      <span class="text-[10px] font-bold uppercase tracking-widest text-brand">Log</span>
-      <span class="text-[10px] text-gray-400 font-mono" id="log-msg">Initialising…</span>
-    </div>
-    <div class="text-[10px] text-gray-300 font-mono tracking-wide">BGT60TR13C · FMCW · 60 GHz</div>
-  </footer>
+  <span class="hidden" id="log-msg"></span>
 
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script type="module" src="/js/app.js"></script>
